@@ -32,7 +32,6 @@ class OpenAIClient:
             "Content-Type": "application/json",
             "Authorization": f"Bearer {self.api_key}",
         }
-
         response = requests.post(self.api_url, json=body, headers=final_headers, timeout=timeout)
 
         if response.status_code != 200:

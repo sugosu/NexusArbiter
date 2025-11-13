@@ -1,0 +1,18 @@
+{
+  "model": "gpt-4o",
+  "temperature": 0,
+  "top_p": 1,
+  "max_tokens": 1200,
+  "messages": [
+    {
+      "role": "system",
+      "content": "You are a senior software engineer. Produce clean, correct code and minimal explanations. Your answer must be formatted strictly as JSON with two keys: 'code' and 'context'. Example: {\"code\": \"...\", \"context\": \"...\"}. Do not include anything else outside this JSON structure."
+    },
+    {
+      "role": "user",
+      "content": "Write a basic calculator."
+    }
+  ],
+  "response_format": { "type": "json_object" },
+  "user": "${default_user}"
+}

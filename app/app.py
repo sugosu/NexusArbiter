@@ -1,43 +1,66 @@
-# app.py
+# app/app.py
+from __future__ import annotations
+
 import os
-from dotenv import load_dotenv
+from pathlib import Path
+
 from core.ai_client.ai_client import OpenAIClient
 from core.ai_client.api_param_generator import AIParamGenerator
+from core.ai_client.ai_profile_loader import AIProfileLoader
 from core.ai_client.ai_response_parser import AIResponseParser
 from core.files.class_generator import ClassGenerator
 
 
-def main():
-    # 1) Init the AI agent (HTTP client)
-    load_dotenv()
-    api_key = os.getenv("OPENAI_API_KEY", "")
+def main(profile_name: str) -> None:
+    project_root = Path(__file__).resolve().parents[1]
+
+    api_key = os.getenv("OPENAI_API_KEY")
+    if not api_key:
+        raise RuntimeError("OPENAI_API_KEY is not set in .env")
+
     client = OpenAIClient(api_key=api_key)
 
-    # 2) Build parameters (payload) using the parameter generator
-    param_gen = AIParamGenerator(client=client, default_user="onat")
-    body = param_gen.build_code_generation()
-
-    # 3) Call the AI agent with the built parameters
-    response = client.send_request(body=body)
-
-    # 4) Extract code + context from the response
-    parsed = AIResponseParser.extract(response)
-    code_str = parsed["code"]
-    context_str = parsed["context"]
-
-    # 5) Generate the .py file (with context as header comments)
-    generator = ClassGenerator(base_path=r"C:\projects\aiAgency")
-    file_path = generator.generate_with_comments(
-        "commit_message_builder.py",
-        code_str,
-        context_str,
+    # Load preset profiles
+    profiles_dir = project_root / "profiles"
+    profile_loader = AIProfileLoader(
+        profiles_dir=profiles_dir,
+        default_user="onat",
     )
 
-    # 6) Print result info (and optional context)
-    print(f"✅ File created: {file_path}")
-    if context_str:
-        print("Context embedded into file header.")
+    presets = profile_loader.load_profiles()
 
+    if profile_name not in presets:
+        raise ValueError(
+            f"Profile '{profile_name}' not found. "
+            f"Available profiles: {', '.join(presets.keys())}"
+        )
 
-if __name__ == "__main__":
-    main()
+    param_gen = AIParamGenerator(
+        client=client,
+        presets=presets,
+        default_user="onat",
+    )
+
+    # Build selected profile request
+    params = param_gen.build_params(profile_name)
+
+    # OPTIONAL: replace "${prompt}" in messages
+    for msg in params.get("messages", []):
+        if msg["role"] == "user" and "${prompt}" in msg["content"]:
+            msg["content"] = "Generate a simple calculator class."  # or dynamic later
+
+    # Call OpenAI
+    response = client.send_request(body=params)
+
+    # Parse
+    parsed = AIResponseParser.extract(response)
+    code_str = parsed["code"]
+    context_str = parsed.get("context", "")
+
+    # Write file
+    generator = ClassGenerator(base_path=str(project_root))
+    file_path = generator.generate_with_comments(
+        "generated_class.py", code_str, context_str
+    )
+
+    print(f"Created: {file_path}")
