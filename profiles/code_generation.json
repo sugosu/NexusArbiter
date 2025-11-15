@@ -10,7 +10,10 @@
     },
     {
       "role": "user",
-      "content": "Write a basic calculator."
+      "content": "Write a basic python logger. That is easily initializer from other classes, provide in a comment within the code, how to implement it to different classes."
+    },
+    {
+      "class": "${class_content}"
     }
   ],
   "response_format": { "type": "json_object" },
