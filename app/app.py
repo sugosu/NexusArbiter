@@ -24,8 +24,8 @@ def main(profile_name: str, class_name: str = "", refactor_class: str = "") -> N
         repo_path=str(project_root),
         default_branch="main",
         remote_name="origin",
-        author_name="AI Agent",
-        author_email="ai@example.com",
+        author_name="Onat Agent",
+        author_email="onat@gegeoglu.com",
     )    
     git_client = GitClient(repo_path=repo_config.repo_path)
     git_manager = GitManager(git_client=git_client)    

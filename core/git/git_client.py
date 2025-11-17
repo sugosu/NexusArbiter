@@ -14,16 +14,29 @@ class GitClient:
         self.logger = BasicLogger(self.__class__.__name__).get_logger()
 
     def _run_git_command(self, *args: str) -> str:
-        """Run a git command with the given arguments and return the output."""
         self.logger.info(f'Running git command: {args}')
-        result = subprocess.run(
-            ['git'] + list(args),
-            cwd=self.repo_path,
-            text=True,
-            capture_output=True,
-            check=True
-        )
-        return result.stdout.strip()
+        try:
+            result = subprocess.run(
+                ['git'] + list(args),
+                cwd=self.repo_path,
+                text=True,
+                capture_output=True,
+                check=True
+            )
+            return result.stdout.strip()
+        except subprocess.CalledProcessError as exc:
+            stdout_msg = (exc.stdout or "").strip()
+            stderr_msg = (exc.stderr or "").strip()
+
+            if stdout_msg:
+                self.logger.error(f"Git stdout (cmd: {args}): {stdout_msg}")
+            if stderr_msg:
+                self.logger.error(f"Git stderr (cmd: {args}): {stderr_msg}")
+
+            # Re-raise so the caller still gets the failure
+            raise
+
+
 
     def init_repo(self) -> None:
         """Initialize a new git repository."""
