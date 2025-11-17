@@ -9,8 +9,6 @@ from core.ai_client.api_param_generator import AIParamGenerator
 from core.ai_client.ai_profile_loader import AIProfileLoader
 from core.ai_client.ai_response_parser import AIResponseParser
 from core.files.class_generator import ClassGenerator
-from core.files.class_reader import read_file
-from core.services.refactor_service import RefactorService
 from core.files.class_reader import PythonFileReader
 
 
@@ -37,9 +35,9 @@ def main(profile_name: str, class_name: str = "", refactor_class: str = "") -> N
             f"Profile '{profile_name}' not found. "
             f"Available profiles: {', '.join(presets.keys())}"
         )
-    
+
     if not class_name:
-        class_name = "namenotmentioned.py" 
+        class_name = "namenotmentioned.py"
 
     param_gen = AIParamGenerator(
         client=client,
@@ -47,13 +45,49 @@ def main(profile_name: str, class_name: str = "", refactor_class: str = "") -> N
         default_user="onat",
     )
 
+    # ------------------------------------------------------------------
+    # REFACTOR MODE: when --refactorclass is provided
+    # ------------------------------------------------------------------
+    if refactor_class:
+        # 1) Read existing file content
+        reader = PythonFileReader(refactor_class)
+        class_str = reader.read_file()
+
+        # 2) Build params from preset (keeps system message + response_format)
+        params = param_gen.build_params(profile_name)
+
+        # 3) Inject class content into the ${class_content} placeholder
+        for msg in params.get("messages", []):
+            content = msg.get("content", "")
+            if isinstance(content, str) and "${class_content}" in content:
+                msg["content"] = content.replace("${class_content}", class_str)
+
+        # 4) Call OpenAI
+        response = client.send_request(body=params)
+
+        # 5) Parse JSON response (expects {"code": "...", "context": "..."})
+        parsed = AIResponseParser.extract(response)
+        code_str = parsed["code"]
+        context_str = parsed.get("context", "")
+
+        # 6) Write refactored file
+        generator = ClassGenerator(base_path=str(project_root))
+        out_name = class_name or "refactored.py"
+        file_path = generator.generate_with_comments(out_name, code_str, context_str)
+
+        print(f"Refactored file created: {file_path}")
+        return
+
+    # ------------------------------------------------------------------
+    # NORMAL GENERATION MODE
+    # ------------------------------------------------------------------
     # Build selected profile request
     params = param_gen.build_params(profile_name)
 
-    # OPTIONAL: replace "${prompt}" in messages
+    # OPTIONAL: replace "${prompt}" in messages (placeholder logic)
     for msg in params.get("messages", []):
-        if msg["role"] == "user" and "${prompt}" in msg["content"]:
-            msg["content"] = "Generate a simple calculator class."  # or dynamic later
+        if msg.get("role") == "user" and "${prompt}" in msg.get("content", ""):
+            msg["content"] = "Generate a simple calculator class."  # adjust later
 
     # Call OpenAI
     response = client.send_request(body=params)
@@ -66,34 +100,9 @@ def main(profile_name: str, class_name: str = "", refactor_class: str = "") -> N
     # Write file
     generator = ClassGenerator(base_path=str(project_root))
     file_path = generator.generate_with_comments(
-        class_name, code_str, context_str
+        class_name,
+        code_str,
+        context_str,
     )
 
     print(f"Created: {file_path}")
-
-# --- REFACTOR MODE ---------------------------------------------------
-    if refactor_class:
-        service = RefactorService(file_path=refactor_class, class_name=class_name)
-        refactor_messages = service.build_messages()
-
-    # Inject override messages into the selected profile
-        overrides = {"messages": refactor_messages}
-
-        params = param_gen.build_params(profile_name, overrides=overrides)
-        response = client.send_request(body=params)
-
-        parsed = AIResponseParser.extract(response)
-        code_str = parsed["code"]
-        context_str = parsed.get("context", "")
-
-        generator = ClassGenerator(base_path=str(project_root))
-        file_path = generator.generate_with_comments(
-            class_name or "refactored.py",
-            code_str,
-            context_str
-        )
-
-    print(f"Refactored file created: {file_path}")
-    return
-# ----------------------------------------------------------------------
-    

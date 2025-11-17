@@ -1,34 +1,21 @@
 # === CONTEXT START ===
-# The GitClient class provides a lightweight wrapper around the Git command-line
-# interface and exposes a clean Python API for core repository operations. It
-# executes all git commands inside the configured repository path using
-# subprocess.run, ensuring consistent behavior and strict error handling.
-#
-# This class supports all essential version-control actions required by the
-# AI-driven code-generation workflow: initializing a repository, adding files,
-# committing changes, switching branches, pulling updates, and pushing changes
-# to a remote. All operations return the command output so higher-level
-# components like GitManager can orchestrate Git actions without dealing with
-# low-level shell details.
-#
-# All Git invocations flow through the private _run_git_command method, which
-# handles argument assembly, working-directory selection, and command execution.
-# This design keeps the API simple, predictable, and fully transparent. The
-# implementation avoids external dependencies like GitPython to maintain
-# portability and full visibility into git usage.
+# Added logging to the GitClient class using BasicLogger. Each method now logs its
+# main action, providing traceability for operations performed by the class.
 # === CONTEXT END ===
-
 
 import subprocess
 from typing import Union
+from core.logger import BasicLogger
 
 class GitClient:
     def __init__(self, repo_path: str):
         """Initialize the GitClient with the path to the repository."""
         self.repo_path = repo_path
+        self.logger = BasicLogger(self.__class__.__name__).get_logger()
 
     def _run_git_command(self, *args: str) -> str:
         """Run a git command with the given arguments and return the output."""
+        self.logger.info(f'Running git command: {args}')
         result = subprocess.run(
             ['git'] + list(args),
             cwd=self.repo_path,
@@ -40,36 +27,44 @@ class GitClient:
 
     def init_repo(self) -> None:
         """Initialize a new git repository."""
+        self.logger.info('Initializing repository')
         self._run_git_command('init')
 
     def add(self, paths: Union[list[str], str]) -> str:
         """Add file contents to the index."""
+        self.logger.info(f'Adding paths: {paths}')
         if isinstance(paths, str):
             paths = [paths]
         return self._run_git_command('add', *paths)
 
     def commit(self, message: str) -> str:
         """Record changes to the repository with a commit message."""
+        self.logger.info(f'Committing with message: {message}')
         return self._run_git_command('commit', '-m', message)
 
     def push(self, remote: str = "origin", branch: str = "main") -> str:
         """Update remote refs along with associated objects."""
+        self.logger.info(f'Pushing to {remote}/{branch}')
         return self._run_git_command('push', remote, branch)
 
     def pull(self, remote: str = "origin", branch: str = "main") -> str:
         """Fetch from and integrate with another repository or a local branch."""
+        self.logger.info(f'Pulling from {remote}/{branch}')
         return self._run_git_command('pull', remote, branch)
 
     def checkout(self, branch: str, create_if_missing: bool = False) -> str:
         """Switch branches or restore working tree files."""
+        self.logger.info(f'Checking out branch: {branch}, create if missing: {create_if_missing}')
         if create_if_missing:
             return self._run_git_command('checkout', '-b', branch)
         return self._run_git_command('checkout', branch)
 
     def status(self) -> str:
         """Show the working tree status."""
+        self.logger.info('Getting status')
         return self._run_git_command('status')
 
     def get_current_branch(self) -> str:
         """Get the name of the current branch."""
+        self.logger.info('Getting current branch')
         return self._run_git_command('rev-parse', '--abbrev-ref', 'HEAD')

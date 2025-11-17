@@ -1,4 +1,9 @@
 # === CONTEXT START ===
+# Added logging to the GitManager class using BasicLogger. Each method now logs
+# its main action.
+# === CONTEXT END ===
+
+# === CONTEXT START ===
 # The GitManager class provides a higher-level orchestration layer for handling
 # version-control operations within the AI-driven code-generation workflow. It
 # acts as a coordinator that builds on top of the low-level GitClient, offering
@@ -13,7 +18,7 @@
 # new code is created or updated. It simplifies integration by providing clean,
 # descriptive methods rather than exposing raw Git commands across the system.
 #
-# GitManager’s responsibilities include switching branches before development,
+# GitManagerâ€™s responsibilities include switching branches before development,
 # committing output files produced by the AI along with their associated
 # context, pulling the latest remote changes to avoid divergence, and pushing
 # updates when required. By centralizing these routines, the framework avoids
@@ -23,6 +28,7 @@
 
 
 from typing import Optional
+from core.logger import BasicLogger
 
 class GitClient:
     def checkout(self, branch: str) -> None:
@@ -42,12 +48,14 @@ class GitClient:
 
 class GitManager:
     def __init__(self, git_client: GitClient) -> None:
+        self.logger = BasicLogger(self.__class__.__name__).get_logger()
         self.git_client = git_client
 
     def prepare_branch(self, branch: str) -> None:
         """
         Checkout the specified branch using the GitClient.
         """
+        self.logger.info(f'Preparing branch: {branch}')
         self.git_client.checkout(branch)
 
     def commit_generated_file(self, file_path: str, context: str) -> str:
@@ -58,6 +66,7 @@ class GitManager:
         :param context: Context to include in the commit message.
         :return: The commit hash returned by the GitClient.
         """
+        self.logger.info(f'Committing generated file: {file_path} with context: {context}')
         self.git_client.add(file_path)
         commit_message = f"Add generated file {file_path}. Context: {context}"
         return self.git_client.commit(commit_message)
@@ -69,6 +78,7 @@ class GitManager:
         :param remote: The remote repository name.
         :param branch: The branch name to pull from.
         """
+        self.logger.info(f'Syncing with remote: {remote}, branch: {branch}')
         self.git_client.pull(remote, branch)
 
     def auto_push(self, commit_message: str, context: str = "") -> None:
@@ -79,5 +89,7 @@ class GitManager:
         :param context: Additional context for the commit message.
         """
         full_message = f"{commit_message}. Context: {context}" if context else commit_message
+        self.logger.info(f'Auto pushing with message: {full_message}')
         self.git_client.commit(full_message)
         self.git_client.push("origin", "main")
+
