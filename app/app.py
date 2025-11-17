@@ -22,7 +22,7 @@ def main(profile_name: str, class_name: str = "", refactor_class: str = "") -> N
     # --- GIT SETUP -----------------------------------------------------
     repo_config = RepoConfig(
         repo_path=str(project_root),
-        default_branch="main",
+        default_branch="master",
         remote_name="origin",
         author_name="Onat Agent",
         author_email="onat@gegeoglu.com",
