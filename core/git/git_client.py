@@ -55,12 +55,12 @@ class GitClient:
         self.logger.info(f'Committing with message: {message}')
         return self._run_git_command('commit', '-m', message)
 
-    def push(self, remote: str = "origin", branch: str = "main") -> str:
+    def push(self, remote: str = "origin", branch: str = "master") -> str:
         """Update remote refs along with associated objects."""
         self.logger.info(f'Pushing to {remote}/{branch}')
         return self._run_git_command('push', remote, branch)
 
-    def pull(self, remote: str = "origin", branch: str = "main") -> str:
+    def pull(self, remote: str = "origin", branch: str = "master") -> str:
         """Fetch from and integrate with another repository or a local branch."""
         self.logger.info(f'Pulling from {remote}/{branch}')
         return self._run_git_command('pull', remote, branch)

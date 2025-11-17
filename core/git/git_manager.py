@@ -31,7 +31,7 @@ class GitManager:
         commit_message = f"Add/update generated file {file_path}. Context: {context[:120]}"
         return self.git_client.commit(commit_message)
 
-    def sync_with_remote(self, remote: str = "origin", branch: str = "main") -> None:
+    def sync_with_remote(self, remote: str = "origin", branch: str = "master") -> None:
         """
         Pull the latest changes from the specified remote and branch.
         """
