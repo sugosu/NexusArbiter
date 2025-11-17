@@ -11,9 +11,24 @@ from core.ai_client.ai_response_parser import AIResponseParser
 from core.files.class_generator import ClassGenerator
 from core.files.class_reader import PythonFileReader
 
+from core.git.repo_config import RepoConfig         
+from core.git.git_client import GitClient          
+from core.git.git_manager import GitManager    
+
 
 def main(profile_name: str, class_name: str = "", refactor_class: str = "") -> None:
     project_root = Path(__file__).resolve().parents[1]
+
+    # --- GIT SETUP -----------------------------------------------------
+    repo_config = RepoConfig(
+        repo_path=str(project_root),
+        default_branch="main",
+        remote_name="origin",
+        author_name="AI Agent",
+        author_email="ai@example.com",
+    )    
+    git_client = GitClient(repo_path=repo_config.repo_path)
+    git_manager = GitManager(git_client=git_client)    
 
     api_key = os.getenv("OPENAI_API_KEY")
     if not api_key:
@@ -70,13 +85,24 @@ def main(profile_name: str, class_name: str = "", refactor_class: str = "") -> N
         code_str = parsed["code"]
         context_str = parsed.get("context", "")
 
-        # 6) Write refactored file
         generator = ClassGenerator(base_path=str(project_root))
         out_name = class_name or "refactored.py"
         file_path = generator.generate_with_comments(out_name, code_str, context_str)
 
-        print(f"Refactored file created: {file_path}")
+        # --- GIT: commit and push refactored file ----------------------
+        try:
+            git_manager.commit_generated_file(file_path, context_str)
+            git_manager.auto_push(
+                commit_message=f"Refactor {out_name}",
+                context=context_str,
+            )
+            print(f"Refactored file created and pushed: {file_path}")
+        except Exception as exc:
+            print(f"Refactored file created but Git push failed: {exc}")
+        # ----------------------------------------------------------------
+
         return
+
 
     # ------------------------------------------------------------------
     # NORMAL GENERATION MODE
@@ -97,7 +123,6 @@ def main(profile_name: str, class_name: str = "", refactor_class: str = "") -> N
     code_str = parsed["code"]
     context_str = parsed.get("context", "")
 
-    # Write file
     generator = ClassGenerator(base_path=str(project_root))
     file_path = generator.generate_with_comments(
         class_name,
@@ -105,4 +130,15 @@ def main(profile_name: str, class_name: str = "", refactor_class: str = "") -> N
         context_str,
     )
 
-    print(f"Created: {file_path}")
+    # --- GIT: commit and push generated file ---------------------------
+    try:
+        git_manager.commit_generated_file(file_path, context_str)
+        git_manager.auto_push(
+            commit_message=f"Generate/update {class_name}",
+            context=context_str,
+        )
+        print(f"Created and pushed: {file_path}")
+    except Exception as exc:
+        print(f"Created file but Git push failed: {exc}")
+    # -------------------------------------------------------------------
+
