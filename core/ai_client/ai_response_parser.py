@@ -1,10 +1,20 @@
+# === CONTEXT START ===
+# Added a logger to the AIResponseParser class using BasicLogger. The logger is
+# initialized in the __init__ method. No changes were made to the public behavior
+# of the methods.
+# === CONTEXT END ===
+
 # core/ai_response_parser.py
 import json
+from core.logger import BasicLogger
 
 class AIResponseParser:
     """
     Extracts structured data (like 'code' and 'context') from AI responses.
     """
+
+    def __init__(self):
+        self.logger = BasicLogger(self.__class__.__name__).get_logger()
 
     @staticmethod
     def _content_dict(response: dict) -> dict:
