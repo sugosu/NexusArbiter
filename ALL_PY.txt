@@ -1,0 +1,1029 @@
+# === FILE: all_classes_extract.py ===
+import os
+from pathlib import Path
+
+OUTPUT_FILE = "ALL_PY.txt"
+
+def collect_all_files(root: Path):
+    collected_parts = []
+
+    for file_path in root.rglob("*.py"):
+        # avoid including the output file itself
+        if file_path.name == OUTPUT_FILE:
+            continue
+
+        try:
+            content = file_path.read_text(encoding="utf-8")
+        except Exception:
+            continue
+
+        header = f"# === FILE: {file_path.relative_to(root)} ===\n"
+        collected_parts.append(header + content + "\n\n")
+
+    return collected_parts
+
+
+if __name__ == "__main__":
+    root = Path(".").resolve()
+    blocks = collect_all_files(root)
+
+    output_path = root / OUTPUT_FILE
+    output_path.write_text("".join(blocks), encoding="utf-8")
+
+    print(f"Collected all .py files into: {output_path}")
+
+
+# === FILE: main.py ===
+# main.py
+from dotenv import load_dotenv
+import argparse
+
+load_dotenv()  # load .env once at entry point
+
+from app.app import main
+
+
+def parse_args():
+    parser = argparse.ArgumentParser(description="AI Code Generation Framework")
+    parser.add_argument(
+        "--profile",
+        type=str,
+        required=True,
+        help="Name of the AI profile to use (e.g. code_generation, fast_chat)",
+    )
+    parser.add_argument(
+        "--classname",
+        type=str,
+        required=False,
+        help="File name to generate",
+    )
+    parser.add_argument(
+        "--refactorclass",
+        type=str,
+        required=False,
+        help="File name to refactor",
+    )            
+    return parser.parse_args()
+
+
+if __name__ == "__main__":
+    args = parse_args()
+    main(
+    profile_name=args.profile,
+    class_name=args.classname,
+    refactor_class=args.refactorclass
+)
+
+# === FILE: app\app.py ===
+# app/app.py
+from __future__ import annotations
+
+import os
+from pathlib import Path
+
+from core.ai_client.ai_client import OpenAIClient
+from core.ai_client.api_param_generator import AIParamGenerator
+from core.ai_client.ai_profile_loader import AIProfileLoader
+from core.ai_client.ai_response_parser import AIResponseParser
+from core.files.class_generator import ClassGenerator
+from core.files.class_reader import PythonFileReader
+
+from core.git.repo_config import RepoConfig         
+from core.git.git_client import GitClient          
+from core.git.git_manager import GitManager    
+
+
+def main(profile_name: str, class_name: str = "", refactor_class: str = "") -> None:
+    project_root = Path(__file__).resolve().parents[1]
+
+    # --- GIT SETUP -----------------------------------------------------
+    repo_config = RepoConfig(
+        repo_path=str(project_root),
+        default_branch="master",
+        remote_name="origin",
+        author_name="Onat Agent",
+        author_email="onat@gegeoglu.com",
+    )    
+    git_client = GitClient(repo_path=repo_config.repo_path)
+    git_manager = GitManager(git_client=git_client)    
+
+    api_key = os.getenv("OPENAI_API_KEY")
+    if not api_key:
+        raise RuntimeError("OPENAI_API_KEY is not set in .env")
+
+    client = OpenAIClient(api_key=api_key)
+
+    # Load preset profiles
+    profiles_dir = project_root / "profiles"
+    profile_loader = AIProfileLoader(
+        profiles_dir=profiles_dir,
+        default_user="onat",
+    )
+
+    presets = profile_loader.load_profiles()
+
+    if profile_name not in presets:
+        raise ValueError(
+            f"Profile '{profile_name}' not found. "
+            f"Available profiles: {', '.join(presets.keys())}"
+        )
+
+    if not class_name:
+        class_name = "namenotmentioned.py"
+
+    param_gen = AIParamGenerator(
+        client=client,
+        presets=presets,
+        default_user="onat",
+    )
+
+    # ------------------------------------------------------------------
+    # REFACTOR MODE: when --refactorclass is provided
+    # ------------------------------------------------------------------
+    if refactor_class:
+        # 1) Read existing file content
+        reader = PythonFileReader(refactor_class)
+        class_str = reader.read_file()
+
+        # 2) Build params from preset (keeps system message + response_format)
+        params = param_gen.build_params(profile_name)
+
+        # 3) Inject class content into the ${class_content} placeholder
+        for msg in params.get("messages", []):
+            content = msg.get("content", "")
+            if isinstance(content, str) and "${class_content}" in content:
+                msg["content"] = content.replace("${class_content}", class_str)
+
+        # 4) Call OpenAI
+        response = client.send_request(body=params)
+
+        # 5) Parse JSON response (expects {"code": "...", "context": "..."})
+        parsed = AIResponseParser.extract(response)
+        code_str = parsed["code"]
+        context_str = parsed.get("context", "")
+
+        generator = ClassGenerator(base_path=str(project_root))
+        out_name = class_name or "refactored.py"
+        file_path = generator.generate_with_comments(out_name, code_str, context_str)
+
+        # --- GIT: commit and push refactored file ----------------------
+        try:
+            git_manager.commit_generated_file(file_path, context_str)
+            git_manager.auto_push(
+                commit_message=f"Refactor {out_name}",
+                context=context_str,
+            )
+            print(f"Refactored file created and pushed: {file_path}")
+        except Exception as exc:
+            print(f"Refactored file created but Git push failed: {exc}")
+        # ----------------------------------------------------------------
+
+        return
+
+
+    # ------------------------------------------------------------------
+    # NORMAL GENERATION MODE
+    # ------------------------------------------------------------------
+    # Build selected profile request
+    params = param_gen.build_params(profile_name)
+
+    # OPTIONAL: replace "${prompt}" in messages (placeholder logic)
+    for msg in params.get("messages", []):
+        if msg.get("role") == "user" and "${prompt}" in msg.get("content", ""):
+            msg["content"] = "Generate a simple calculator class."  # adjust later
+
+    # Call OpenAI
+    response = client.send_request(body=params)
+
+    # Parse
+    parsed = AIResponseParser.extract(response)
+    code_str = parsed["code"]
+    context_str = parsed.get("context", "")
+
+    generator = ClassGenerator(base_path=str(project_root))
+    file_path = generator.generate_with_comments(
+        class_name,
+        code_str,
+        context_str,
+    )
+
+    # --- GIT: commit and push generated file ---------------------------
+    try:
+        git_manager.commit_generated_file(file_path, context_str)
+        git_manager.auto_push(
+            commit_message=f"Generate/update {class_name}",
+            context=context_str,
+        )
+        print(f"Created and pushed: {file_path}")
+    except Exception as exc:
+        print(f"Created file but Git push failed: {exc}")
+    # -------------------------------------------------------------------
+
+
+
+# === FILE: core\logger.py ===
+# === CONTEXT START ===
+# This code defines a BasicLogger class that can be easily initialized in other
+# classes to provide logging functionality. The logger is configured with a stream
+# handler and a formatter, and it ensures that multiple handlers are not added to
+# the logger. The example in the comment shows how to use the BasicLogger in
+# another class by initializing it with the class name and using it to log
+# messages.
+# === CONTEXT END ===
+
+import logging
+
+class BasicLogger:
+    def __init__(self, name: str, level: int = logging.INFO):
+        self.logger = logging.getLogger(name)
+        self.logger.setLevel(level)
+        handler = logging.StreamHandler()
+        formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+        handler.setFormatter(formatter)
+        if not self.logger.handlers:
+            self.logger.addHandler(handler)
+
+    def get_logger(self):
+        return self.logger
+
+# Example of how to implement the logger in another class:
+#
+# class MyClass:
+#     def __init__(self):
+#         self.logger = BasicLogger(self.__class__.__name__).get_logger()
+#
+#     def do_something(self):
+#         self.logger.info('Doing something')
+#
+# my_instance = MyClass()
+# my_instance.do_something()
+
+
+# === FILE: core\__init__.py ===
+
+
+# === FILE: core\ai_client\ai_client.py ===
+import requests
+from typing import Dict, Any, Optional
+
+class OpenAIClient:
+    """
+    Handles direct HTTP calls to the OpenAI API.
+    """
+
+    def __init__(self, api_url: str = "https://api.openai.com/v1/chat/completions", api_key: str = ""):
+        """
+        Initialize the client with the API endpoint and key.
+        :param api_url: Endpoint URL for OpenAI API.
+        :param api_key: API key (placeholder by default).
+        """
+        self.api_url = api_url
+        self.api_key = api_key
+
+    def send_request(
+        self,
+        body: Dict[str, Any],
+        headers: Optional[Dict[str, str]] = None,
+        timeout: int = 30
+    ) -> Dict[str, Any]:
+        """
+        Sends a POST request to the OpenAI API with the provided body and headers.
+        :param body: JSON payload for the request.
+        :param headers: Optional custom headers. If None, default headers will be used.
+        :param timeout: Timeout in seconds for the request.
+        :return: JSON response as a dictionary.
+        """
+        final_headers = headers or {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {self.api_key}",
+        }
+        response = requests.post(self.api_url, json=body, headers=final_headers, timeout=timeout)
+
+        if response.status_code != 200:
+            raise Exception(f"OpenAI API error {response.status_code}: {response.text}")
+
+        return response.json()
+
+# === FILE: core\ai_client\ai_profile_loader.py ===
+from __future__ import annotations
+
+import json
+from pathlib import Path
+from typing import Any, Dict, Mapping, Optional
+import copy
+
+
+class AIProfileLoader:
+    """
+    Loads JSON preset profiles from a directory and provides them as dictionaries.
+
+    Features:
+    - Loads all *.json files from a directory.
+    - Each file may contain:
+        A) a single profile object  (with keys like 'model', 'messages', etc.), or
+        B) a mapping of multiple profiles, e.g. { "fast_chat": {...}, "code_generation": {...} }.
+    - Uses the JSON 'name' field or filename stem (case A), or the dict key (case B) as profile name.
+    - Applies simple placeholder substitution (e.g. ${default_user}).
+    - Caches loaded profiles in-memory.
+    """
+
+    def __init__(
+        self,
+        profiles_dir: str | Path,
+        default_user: str = "onat",
+        extra_placeholders: Optional[Mapping[str, str]] = None,
+        encoding: str = "utf-8",
+    ) -> None:
+        self.profiles_dir = Path(profiles_dir)
+        self.encoding = encoding
+
+        # Placeholder map, e.g. {"${default_user}": "onat"}
+        placeholder_map: Dict[str, str] = {
+            "${default_user}": default_user,
+        }
+        if extra_placeholders:
+            placeholder_map.update(extra_placeholders)
+
+        self._placeholder_map = placeholder_map
+
+        self._profiles: Dict[str, Dict[str, Any]] = {}
+        self._loaded: bool = False
+
+    # ------------------------------------------------------------------ #
+    # Public API
+    # ------------------------------------------------------------------ #
+    def load_profiles(self, force_reload: bool = False) -> Dict[str, Dict[str, Any]]:
+        """
+        Load all JSON profiles from profiles_dir into memory.
+
+        Returns a mapping:
+            { profile_name: profile_dict }
+        """
+        if self._loaded and not force_reload:
+            return copy.deepcopy(self._profiles)
+
+        if not self.profiles_dir.exists():
+            raise FileNotFoundError(
+                f"Profiles directory does not exist: {self.profiles_dir}"
+            )
+
+        loaded: Dict[str, Dict[str, Any]] = {}
+
+        for path in sorted(self.profiles_dir.glob("*.json")):
+            with path.open("r", encoding=self.encoding) as f:
+                raw = json.load(f)
+
+            # Case A: file holds a single profile dict at the top level.
+            # We treat it as a profile if it looks like a payload: has 'model' or 'messages'
+            # or explicitly defines 'name'.
+            if isinstance(raw, dict) and (
+                "model" in raw or "messages" in raw or "name" in raw
+            ):
+                profile_name = raw.get("name") or path.stem
+                processed = self._apply_placeholders(raw)
+                loaded[profile_name] = processed
+                continue
+
+            # Case B: file holds multiple profiles in a mapping:
+            # { "fast_chat": {...}, "code_generation": {...} }
+            if isinstance(raw, dict):
+                for profile_name, profile_body in raw.items():
+                    if not isinstance(profile_body, dict):
+                        # Skip non-dict items silently; they are not valid profiles.
+                        continue
+                    processed = self._apply_placeholders(profile_body)
+                    loaded[profile_name] = processed
+                continue
+
+            # Anything else is considered invalid.
+            raise ValueError(
+                f"Unsupported JSON structure in profile file: {path}. "
+                "Expected a dict representing a single profile or a dict of profiles."
+            )
+
+        self._profiles = loaded
+        self._loaded = True
+
+        return copy.deepcopy(self._profiles)
+
+    def get_profile(self, name: str) -> Dict[str, Any]:
+        """
+        Return a single profile by name.
+
+        Raises KeyError if not found.
+        """
+        if not self._loaded:
+            self.load_profiles()
+
+        try:
+            return copy.deepcopy(self._profiles[name])
+        except KeyError as exc:
+            known = ", ".join(sorted(self._profiles)) or "<none>"
+            raise KeyError(
+                f"Unknown profile '{name}'. Known profiles: {known}"
+            ) from exc
+
+    def get_all_profiles(self) -> Dict[str, Dict[str, Any]]:
+        """
+        Convenience: return all loaded profiles.
+        """
+        if not self._loaded:
+            self.load_profiles()
+        return copy.deepcopy(self._profiles)
+
+    # ------------------------------------------------------------------ #
+    # Internal helpers
+    # ------------------------------------------------------------------ #
+    def _apply_placeholders(self, obj: Any) -> Any:
+        """
+        Recursively apply string placeholder substitution on a JSON-like object.
+        """
+        if isinstance(obj, dict):
+            return {k: self._apply_placeholders(v) for k, v in obj.items()}
+        if isinstance(obj, list):
+            return [self._apply_placeholders(v) for v in obj]
+        if isinstance(obj, str):
+            return self._replace_in_string(obj)
+        return obj
+
+    def _replace_in_string(self, value: str) -> str:
+        """
+        Replace occurrences of ${...} placeholders in a string.
+        """
+        result = value
+        for placeholder, replacement in self._placeholder_map.items():
+            if placeholder in result:
+                result = result.replace(placeholder, replacement)
+        return result
+
+
+# === FILE: core\ai_client\ai_response_parser.py ===
+# core/ai_response_parser.py
+import json
+
+class AIResponseParser:
+    """
+    Extracts structured data (like 'code' and 'context') from AI responses.
+    """
+
+    @staticmethod
+    def _content_dict(response: dict) -> dict:
+        """
+        Safely turn message content into a dict. Returns {} on failure.
+        """
+        try:
+            content = response["choices"][0]["message"]["content"]
+            # Content is expected to be a raw JSON object (response_format=json_object).
+            return json.loads(content)
+        except (KeyError, json.JSONDecodeError, TypeError):
+            return {}
+
+    @classmethod
+    def extract_code(cls, response: dict) -> str:
+        """
+        Extract the 'code' value from the model's response JSON.
+        """
+        data = cls._content_dict(response)
+        val = data.get("code", "")
+        return val if isinstance(val, str) else ""
+
+    @classmethod
+    def extract_context(cls, response: dict) -> str:
+        """
+        Extract the 'context' value from the model's response JSON.
+        """
+        data = cls._content_dict(response)
+        val = data.get("context", "")
+        return val if isinstance(val, str) else ""
+
+    @classmethod
+    def extract(cls, response: dict) -> dict:
+        """
+        Extract both 'code' and 'context'. Missing fields become empty strings.
+        Returns: {"code": str, "context": str}
+        """
+        data = cls._content_dict(response)
+        code = data.get("code", "")
+        context = data.get("context", "")
+        return {
+            "code": code if isinstance(code, str) else "",
+            "context": context if isinstance(context, str) else "",
+        }
+
+
+# === FILE: core\ai_client\api_param_generator.py ===
+from __future__ import annotations
+
+from typing import Any, Dict, Mapping, MutableMapping, Optional
+import copy
+
+
+class AIParamGenerator:
+    """
+    Builds ready-to-send payloads for OpenAI's /v1/chat/completions
+    and dispatches them using an injected OpenAIClient-compatible instance.
+
+    Presets are provided externally (e.g. from JSON via AIProfileLoader).
+
+    Expected shape of a preset (minimal):
+
+    {
+        "model": "gpt-5-turbo",
+        "temperature": 0,
+        "max_output_tokens": 1200,
+        "response_format": {...},   # optional
+        "messages": [...],          # optional, can be overridden
+        "metadata": {...},          # optional
+        "user": "onat"              # optional, default_user is filled if missing
+    }
+
+    The actual keys can be any valid /v1/chat/completions payload parameters.
+    """
+
+    def __init__(
+        self,
+        client: Any,
+        presets: Mapping[str, Mapping[str, Any]],
+        default_user: str = "onat",
+    ) -> None:
+        self.client = client
+        self.default_user = default_user
+        self._presets: Dict[str, Dict[str, Any]] = {
+            name: dict(value) for name, value in presets.items()
+        }
+
+    # ------------------------------------------------------------------ #
+    # Preset management
+    # ------------------------------------------------------------------ #
+    def set_presets(self, presets: Mapping[str, Mapping[str, Any]]) -> None:
+        """
+        Replace the internal preset mapping at runtime.
+        """
+        self._presets = {name: dict(value) for name, value in presets.items()}
+
+    def get_preset_names(self) -> tuple[str, ...]:
+        """
+        Return tuple of known preset names.
+        """
+        return tuple(sorted(self._presets))
+
+    def _get_base_preset(self, name: str) -> Dict[str, Any]:
+        try:
+            return copy.deepcopy(self._presets[name])
+        except KeyError as exc:
+            known = ", ".join(sorted(self._presets)) or "<none>"
+            raise KeyError(
+                f"Unknown preset '{name}'. Known presets: {known}"
+            ) from exc
+
+    # ------------------------------------------------------------------ #
+    # Core API
+    # ------------------------------------------------------------------ #
+    def build_params(
+        self,
+        preset_name: str,
+        overrides: Optional[Mapping[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """
+        Build a chat/completions payload from a preset, applying overrides.
+
+        - Deep-merges overrides into the base preset.
+        - Ensures 'user' key is present (using default_user) if missing.
+        """
+        params = self._get_base_preset(preset_name)
+
+        if overrides:
+            self._deep_merge(params, overrides)
+
+        if "user" not in params and self.default_user:
+            params["user"] = self.default_user
+
+        return params
+
+    def send(
+        self,
+        preset_name: str,
+        overrides: Optional[Mapping[str, Any]] = None,
+    ) -> Any:
+        """
+        Build params and dispatch the request via the injected client.
+
+        The client is expected to expose a method compatible with:
+            client.post_chat_completions(payload: dict) -> dict
+        Adjust this call to match your real OpenAIClient interface.
+        """
+        payload = self.build_params(preset_name, overrides=overrides)
+
+        # 🔧 Adjust this to your real client API:
+        # e.g. self.client.create_chat_completion(**payload)
+        # or    self.client.post("chat/completions", json=payload)
+        return self.client.post_chat_completions(payload)
+
+    # ------------------------------------------------------------------ #
+    # Utilities
+    # ------------------------------------------------------------------ #
+    @classmethod
+    def _deep_merge(
+        cls,
+        target: MutableMapping[str, Any],
+        updates: Mapping[str, Any],
+    ) -> None:
+        """
+        In-place deep merge of 'updates' into 'target'.
+
+        - Dict values are merged recursively.
+        - Non-dict values overwrite.
+        - Lists are overwritten by default (you can customize if needed).
+        """
+        for key, value in updates.items():
+            if (
+                key in target
+                and isinstance(target[key], dict)
+                and isinstance(value, Mapping)
+            ):
+                cls._deep_merge(target[key], value)
+            else:
+                target[key] = copy.deepcopy(value)
+
+
+# === FILE: core\ai_client\__init__.py ===
+
+
+# === FILE: core\files\class_generator.py ===
+# === CONTEXT START ===
+# The ClassGenerator class is responsible for writing Python source code to disk
+# and ensuring that generated files are saved in a clean, structured, and
+# predictable way. It serves as the main output layer of the AI-driven
+# code-generation pipeline, receiving raw code strings from the model and
+# converting them into .py files located within the configured project
+# directory.
+#
+# The class provides two modes of operation: a basic file-generation method that
+# writes code exactly as received, and an enhanced method that automatically
+# prefixes the file with a formatted CONTEXT block. This comment block embeds
+# human-readable metadata or explanation produced by the AI, wrapped to 80
+# characters for readability and delimited with START and END markers. This
+# allows each generated file to carry its own reasoning, intent, or description,
+# which becomes valuable for future maintenance, refactoring, and tracing logic.
+#
+# To maintain portability and prevent unexpected filesystem errors, the class
+# guarantees that the target output directory is created on initialization. It
+# performs no interpretation of the code itself; its sole responsibility is to
+# accurately persist the given content to the filesystem in a clean and
+# repeatable manner, forming the foundation for downstream processes such as Git
+# commits or subsequent model iterations.
+# === CONTEXT END ===
+
+import os
+import textwrap
+from typing import Optional
+
+class ClassGenerator:
+    """
+    Generates a .py file from a provided string at the specified path.
+    """
+
+    def __init__(self, base_path: str):
+        """
+        Initialize the file generator with the base path for output.
+        :param base_path: Directory where the .py file will be created.
+        """
+        self.base_path = os.path.abspath(base_path)
+        os.makedirs(self.base_path, exist_ok=True)
+
+    def _build_comment_block(self, comments: str) -> str:
+        """
+        Build a readable, wrapped, multi-line Python comment block.
+        Long lines are wrapped at ~80 characters for readability.
+        """
+        if not comments or not comments.strip():
+            return ""
+
+        # Wrap long text into multiple lines (80 chars per line)
+        wrapped = textwrap.fill(comments.strip(), width=80)
+        lines = wrapped.split("\n")
+
+        header = ["# === CONTEXT START ==="]
+        header.extend(f"# {line}" for line in lines)
+        header.append("# === CONTEXT END ===")
+        header.append("")  # blank line after the block
+
+        return "\n".join(header)
+
+    def generate(self, filename: str, content: str) -> str:
+        """
+        Writes the given string content to a .py file in the base path.
+        :param filename: Name of the file (without .py extension).
+        :param content: Python source code to write.
+        :return: Full path of the generated file.
+        """
+        if not filename.endswith(".py"):
+            filename = f"{filename}.py"
+
+        full_path = os.path.join(self.base_path, filename)
+
+        with open(full_path, "w", encoding="utf-8") as f:
+            f.write(content)
+
+        return full_path
+
+    def generate_with_comments(self, filename: str, content: str, comments: Optional[str] = None) -> str:
+        """
+        Writes the given content to a .py file, optionally prefixed with a
+        formatted comment block built from the provided comments string.
+        """
+        if comments:
+            comment_block = self._build_comment_block(comments)
+            content = f"{comment_block}\n{content}"
+
+        return self.generate(filename, content)
+
+
+# === FILE: core\files\class_reader.py ===
+# === CONTEXT START ===
+# The PythonFileReader class provides a simple and reliable utility for loading
+# Python source files from disk and returning their contents as a raw string.
+# It ensures that the requested file actually exists and validates that the
+# target is a .py file before attempting to read it.
+#
+# This class is used by the AI-driven development framework when existing Python
+# files need to be ingested, analyzed, or passed back to the model for
+# refactoring. By centralizing file reading logic, the codebase avoids repetitive
+# I/O operations throughout different components and maintains consistent error
+# handling for missing or invalid file paths.
+#
+# The implementation intentionally avoids any post-processing or parsing of the
+# file's content. It returns the exact text of the file as-is, preserving
+# formatting, comments, and structure so that downstream processes — such as
+# code generation, diffing, or context injection — receive the full and accurate
+# representation of the original source.
+# === CONTEXT END ===
+
+
+import os
+
+class PythonFileReader:
+    def __init__(self, file_path):
+        self.file_path = file_path
+
+    def read_file(self):
+        if not os.path.isfile(self.file_path):
+            raise FileNotFoundError(f"The file {self.file_path} does not exist.")
+        if not self.file_path.endswith('.py'):
+            raise ValueError("The file is not a Python (.py) file.")
+        with open(self.file_path, 'r') as file:
+            return file.read()
+
+# Example usage:
+# reader = PythonFileReader('example.py')
+# code_string = reader.read_file()
+# print(code_string)
+
+
+# === FILE: core\files\__init__.py ===
+
+
+# === FILE: core\git\commit_message_builder.py ===
+# === CONTEXT START ===
+# The CommitMessageBuilder class is designed to create standardized commit
+# messages for version control systems. It includes a static method 'build' that
+# constructs a commit message using the file name, a short description, a detailed
+# context, and the author's name. This utility can be used to ensure consistency
+# in commit messages across a project.
+# === CONTEXT END ===
+
+class CommitMessageBuilder:
+    """
+    A utility class to build commit messages for version control.
+    """
+
+    @staticmethod
+    def build(file_path: str, context: str, author: str = "AI_Agent") -> str:
+        """
+        Builds a formatted commit message.
+
+        :param file_path: The path of the file being committed.
+        :param context: A detailed, multi-line description of the changes.
+        :param author: The author of the commit, default is 'AI_Agent'.
+        :return: A formatted commit message string.
+        """
+        filename = file_path.split('/')[-1]
+        short_description = f"Update {filename}"
+        commit_message = f"{short_description}\n\n{context}\n\nAuthor: {author}"
+        return commit_message
+
+
+# === FILE: core\git\git_client.py ===
+# === CONTEXT START ===
+# Added logging to the GitClient class using BasicLogger. Each method now logs its
+# main action, providing traceability for operations performed by the class.
+# === CONTEXT END ===
+
+import subprocess
+from typing import Union
+from core.logger import BasicLogger
+
+class GitClient:
+    def __init__(self, repo_path: str):
+        """Initialize the GitClient with the path to the repository."""
+        self.repo_path = repo_path
+        self.logger = BasicLogger(self.__class__.__name__).get_logger()
+
+    def _run_git_command(self, *args: str) -> str:
+        self.logger.info(f'Running git command: {args}')
+        try:
+            result = subprocess.run(
+                ['git'] + list(args),
+                cwd=self.repo_path,
+                text=True,
+                capture_output=True,
+                check=True
+            )
+            return result.stdout.strip()
+        except subprocess.CalledProcessError as exc:
+            stdout_msg = (exc.stdout or "").strip()
+            stderr_msg = (exc.stderr or "").strip()
+
+            if stdout_msg:
+                self.logger.error(f"Git stdout (cmd: {args}): {stdout_msg}")
+            if stderr_msg:
+                self.logger.error(f"Git stderr (cmd: {args}): {stderr_msg}")
+
+            # Re-raise so the caller still gets the failure
+            raise
+
+
+
+    def init_repo(self) -> None:
+        """Initialize a new git repository."""
+        self.logger.info('Initializing repository')
+        self._run_git_command('init')
+
+    def add(self, paths: Union[list[str], str]) -> str:
+        """Add file contents to the index."""
+        self.logger.info(f'Adding paths: {paths}')
+        if isinstance(paths, str):
+            paths = [paths]
+        return self._run_git_command('add', *paths)
+
+    def commit(self, message: str) -> str:
+        """Record changes to the repository with a commit message."""
+        self.logger.info(f'Committing with message: {message}')
+        return self._run_git_command('commit', '-m', message)
+
+    def push(self, remote: str = "origin", branch: str = "master") -> str:
+        """Update remote refs along with associated objects."""
+        self.logger.info(f'Pushing to {remote}/{branch}')
+        return self._run_git_command('push', remote, branch)
+
+    def pull(self, remote: str = "origin", branch: str = "master") -> str:
+        """Fetch from and integrate with another repository or a local branch."""
+        self.logger.info(f'Pulling from {remote}/{branch}')
+        return self._run_git_command('pull', remote, branch)
+
+    def checkout(self, branch: str, create_if_missing: bool = False) -> str:
+        """Switch branches or restore working tree files."""
+        self.logger.info(f'Checking out branch: {branch}, create if missing: {create_if_missing}')
+        if create_if_missing:
+            return self._run_git_command('checkout', '-b', branch)
+        return self._run_git_command('checkout', branch)
+
+    def status(self) -> str:
+        """Show the working tree status."""
+        self.logger.info('Getting status')
+        return self._run_git_command('status')
+
+    def get_current_branch(self) -> str:
+        """Get the name of the current branch."""
+        self.logger.info('Getting current branch')
+        return self._run_git_command('rev-parse', '--abbrev-ref', 'HEAD')
+
+
+# === FILE: core\git\git_manager.py ===
+# core/git/git_manager.py
+
+# === CONTEXT START ===
+# The GitManager class provides a higher-level orchestration layer for handling
+# version-control operations within the AI-driven code-generation workflow.
+# === CONTEXT END ===
+
+from typing import Optional
+from core.git.git_client import GitClient  # adjust path if different
+
+
+class GitManager:
+    def __init__(self, git_client: GitClient) -> None:
+        self.git_client = git_client
+
+    def prepare_branch(self, branch: str) -> None:
+        """
+        Checkout the specified branch using the GitClient.
+        """
+        self.git_client.checkout(branch)
+
+    def commit_generated_file(self, file_path: str, context: str) -> str:
+        """
+        Add the specified file and commit it with a message including the context.
+
+        :param file_path: Path to the file to be committed.
+        :param context: Context to include in the commit message.
+        :return: The commit hash or output returned by the GitClient.
+        """
+        self.git_client.add(file_path)
+        commit_message = f"Add/update generated file {file_path}. Context: {context[:120]}"
+        return self.git_client.commit(commit_message)
+
+    def sync_with_remote(self, remote: str = "origin", branch: str = "master") -> None:
+        """
+        Pull the latest changes from the specified remote and branch.
+        """
+        self.git_client.pull(remote, branch)
+
+    def auto_push(self, commit_message: str, context: str = "") -> None:
+        """
+        Commit with the provided message and push to the remote.
+        """
+        full_message = (
+            f"{commit_message}. Context: {context[:120]}" if context else commit_message
+        )
+#        self.git_client.commit(full_message)
+        self.git_client.push("origin", "master")
+
+
+# === FILE: core\git\repo_config.py ===
+# === CONTEXT START ===
+# This code defines a Python data class named RepoConfig using the @dataclass
+# decorator. It includes type hints for each field and a class-level docstring
+# that describes the purpose of the class and its attributes. Default values are
+# provided for all fields except repo_path.
+# === CONTEXT END ===
+
+from dataclasses import dataclass
+
+@dataclass
+class RepoConfig:
+    """
+    Configuration for a repository.
+
+    Attributes:
+        repo_path (str): The file path to the repository.
+        default_branch (str): The default branch of the repository. Defaults to 'master'.
+        remote_name (str): The name of the remote. Defaults to 'origin'.
+        author_name (str): The name of the author. Defaults to 'AI Agent'.
+        author_email (str): The email of the author. Defaults to 'ai@example.com'.
+    """
+    repo_path: str
+    default_branch: str = "master"
+    remote_name: str = "origin"
+    author_name: str = "AI Agent"
+    author_email: str = "ai@example.com"
+
+
+# === FILE: core\services\refactor_service.py ===
+from core.files.class_reader import PythonFileReader
+
+class RefactorService:
+    """
+    Prepares refactor messages for the model by injecting file content
+    and optional class name hints into a clean, deterministic message structure.
+    """
+
+    def __init__(self, file_path: str, class_name: str | None = None):
+        self.file_path = file_path
+        self.class_name = class_name
+
+    def build_messages(self) -> list[dict]:
+        reader = PythonFileReader(self.file_path)
+        content = reader.read_file()
+
+        class_hint = (
+            f"\nFocus on improving the class named `{self.class_name}`.\n"
+            if self.class_name else ""
+        )
+
+        system_msg = {
+            "role": "system",
+            "content": (
+                "You are a senior Python engineer. Refactor the provided code into a "
+                "clean, maintainable, readable, idiomatic form. Preserve external "
+                "behavior and public API. Do not add comments explaining changes."
+            )
+        }
+
+        user_msg = {
+            "role": "user",
+            "content": (
+                f"Refactor the following file.{class_hint}\n"
+                "Return ONLY the final refactored Python code.\n\n"
+                "```python\n"
+                f"{content}\n"
+                "```"
+            )
+        }
+
+        return [system_msg, user_msg]
+
+
+# === FILE: app\__pycache__\__init__.py ===
+
+
