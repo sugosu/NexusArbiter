@@ -1,7 +1,14 @@
+# === CONTEXT START ===
+# Added logging to the AIParamGenerator class using BasicLogger. A logger instance
+# is created in the __init__ method, and minimal logging is added to the
+# build_params and send methods to log important actions.
+# === CONTEXT END ===
+
 from __future__ import annotations
 
 from typing import Any, Dict, Mapping, MutableMapping, Optional
 import copy
+from core.logger import BasicLogger
 
 
 class AIParamGenerator:
@@ -32,6 +39,7 @@ class AIParamGenerator:
         presets: Mapping[str, Mapping[str, Any]],
         default_user: str = "onat",
     ) -> None:
+        self.logger = BasicLogger(self.__class__.__name__).get_logger()
         self.client = client
         self.default_user = default_user
         self._presets: Dict[str, Dict[str, Any]] = {
@@ -76,6 +84,7 @@ class AIParamGenerator:
         - Deep-merges overrides into the base preset.
         - Ensures 'user' key is present (using default_user) if missing.
         """
+        self.logger.info(f"Building parameters for preset: {preset_name}")
         params = self._get_base_preset(preset_name)
 
         if overrides:
@@ -98,9 +107,10 @@ class AIParamGenerator:
             client.post_chat_completions(payload: dict) -> dict
         Adjust this call to match your real OpenAIClient interface.
         """
+        self.logger.info(f"Sending request for preset: {preset_name}")
         payload = self.build_params(preset_name, overrides=overrides)
 
-        # 🔧 Adjust this to your real client API:
+        # ðŸ”§ Adjust this to your real client API:
         # e.g. self.client.create_chat_completion(**payload)
         # or    self.client.post("chat/completions", json=payload)
         return self.client.post_chat_completions(payload)
