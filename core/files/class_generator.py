@@ -1,4 +1,10 @@
 # === CONTEXT START ===
+# Added logging to the ClassGenerator class using BasicLogger. A logger instance
+# is created in the __init__ method, and an info log is added in the generate
+# method to log when a file is being generated.
+# === CONTEXT END ===
+
+# === CONTEXT START ===
 # The ClassGenerator class is responsible for writing Python source code to disk
 # and ensuring that generated files are saved in a clean, structured, and
 # predictable way. It serves as the main output layer of the AI-driven
@@ -25,6 +31,7 @@
 import os
 import textwrap
 from typing import Optional
+from core.logger import BasicLogger
 
 class ClassGenerator:
     """
@@ -36,6 +43,7 @@ class ClassGenerator:
         Initialize the file generator with the base path for output.
         :param base_path: Directory where the .py file will be created.
         """
+        self.logger = BasicLogger(self.__class__.__name__).get_logger()
         self.base_path = os.path.abspath(base_path)
         os.makedirs(self.base_path, exist_ok=True)
 
@@ -65,6 +73,7 @@ class ClassGenerator:
         :param content: Python source code to write.
         :return: Full path of the generated file.
         """
+        self.logger.info(f"Generating file: {filename}")
         if not filename.endswith(".py"):
             filename = f"{filename}.py"
 
