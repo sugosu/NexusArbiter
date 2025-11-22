@@ -1,3 +1,9 @@
+# === CONTEXT START ===
+# Added logging to the main function using BasicLogger. Logging is initialized at
+# the start of the main function and used to log important events such as mode
+# activation and file operations.
+# === CONTEXT END ===
+
 # app/app.py
 from __future__ import annotations
 
@@ -14,9 +20,11 @@ from core.files.class_reader import PythonFileReader
 from core.git.repo_config import RepoConfig         
 from core.git.git_client import GitClient          
 from core.git.git_manager import GitManager    
+from core.logger import BasicLogger
 
 
 def main(profile_name: str, class_name: str = "", refactor_class: str = "") -> None:
+    logger = BasicLogger(main.__name__).get_logger()
     project_root = Path(__file__).resolve().parents[1]
 
     # --- GIT SETUP -----------------------------------------------------
@@ -64,6 +72,7 @@ def main(profile_name: str, class_name: str = "", refactor_class: str = "") -> N
     # REFACTOR MODE: when --refactorclass is provided
     # ------------------------------------------------------------------
     if refactor_class:
+        logger.info('Refactor mode activated')
         # 1) Read existing file content
         reader = PythonFileReader(refactor_class)
         class_str = reader.read_file()
@@ -96,9 +105,9 @@ def main(profile_name: str, class_name: str = "", refactor_class: str = "") -> N
                 commit_message=f"Refactor {out_name}",
                 context=context_str,
             )
-            print(f"Refactored file created and pushed: {file_path}")
+            logger.info(f"Refactored file created and pushed: {file_path}")
         except Exception as exc:
-            print(f"Refactored file created but Git push failed: {exc}")
+            logger.error(f"Refactored file created but Git push failed: {exc}")
         # ----------------------------------------------------------------
 
         return
@@ -107,6 +116,7 @@ def main(profile_name: str, class_name: str = "", refactor_class: str = "") -> N
     # ------------------------------------------------------------------
     # NORMAL GENERATION MODE
     # ------------------------------------------------------------------
+    logger.info('Normal generation mode activated')
     # Build selected profile request
     params = param_gen.build_params(profile_name)
 
@@ -137,8 +147,9 @@ def main(profile_name: str, class_name: str = "", refactor_class: str = "") -> N
             commit_message=f"Generate/update {class_name}",
             context=context_str,
         )
-        print(f"Created and pushed: {file_path}")
+        logger.info(f"Created and pushed: {file_path}")
     except Exception as exc:
-        print(f"Created file but Git push failed: {exc}")
+        logger.error(f"Created file but Git push failed: {exc}")
     # -------------------------------------------------------------------
+
 
