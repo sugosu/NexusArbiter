@@ -44,5 +44,5 @@ class GitManager:
         full_message = (
             f"{commit_message}. Context: {context[:120]}" if context else commit_message
         )
-        self.git_client.commit(full_message)
+#        self.git_client.commit(full_message)
         self.git_client.push("origin", "master")
