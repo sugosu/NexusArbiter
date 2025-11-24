@@ -1,7 +1,7 @@
 # === CONTEXT START ===
-# Added logging to the Calculator class to log each arithmetic operation and
-# handle division by zero errors. This will help in tracing the computation values
-# step-by-step.
+# Added logging to the Calculator class to log each operation and its result.
+# Configured logging in the constructor and added debug logs for each arithmetic
+# operation. An error log is added for division by zero.
 # === CONTEXT END ===
 
 # === CONTEXT START ===

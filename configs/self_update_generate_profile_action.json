@@ -1,0 +1,21 @@
+{
+  "runs": [
+    {
+      "profile_name": "code_refactor",
+      "class_name": "app/app.py",
+      "refactor_class": "app/app.py",
+      "task_description": "Update the ALLOWED_ACTION_TYPES set in app/app.py to include the new action type 'generate_profile_file'.\n\nRequirements:\n- Find the existing ALLOWED_ACTION_TYPES set definition.\n- Ensure the string 'generate_profile_file' is present in the set.\n- Keep all existing entries (such as 'generate_class_file', 'generate_test_file', 'continue', etc.) exactly as they are.\n- Do NOT remove or rename anything.\n- Do NOT modify any other code, imports, logging, or logic in this file.\n- Preserve the existing formatting and comments as much as possible.\n\nThe goal is ONLY to make sure ALLOWED_ACTION_TYPES contains 'generate_profile_file'."
+    },
+    {
+      "profile_name": "framework_action_generator",
+      "class_name": "core/actions/generate_profile_file.py",
+      "task_description": "Generate or refactor an action module under core/actions/generate_profile_file.py.\n\nGoal:\n- Define an action that writes arbitrary text (typically JSON) into a file under the project root.\n\nClass and params:\n- Define class GenerateProfileFileAction(BaseAction) with action_type = \"generate_profile_file\".\n- Expected params in self.params:\n  {\n    \"target_path\": string,   // e.g. \"profiles/security_scan.json\",\n    \"content\": string,       // full file content to write (e.g. JSON for a profile),\n    \"context\": string | null // optional human-readable context for logging\n  }\n\nvalidate(self):\n- Return True only if:\n  - target_path is a non-empty string\n  - content is a non-empty string\n\nexecute(self, ctx):\n- Treat ctx.project_root as the repository root.\n- Resolve the full path as: Path(ctx.project_root) / target_path.\n- Ensure the parent directory exists: parent.mkdir(parents=True, exist_ok=True).\n- Write the content to the file in text mode with UTF-8 encoding.\n  - IMPORTANT: Do NOT add any extra comments or headers; write content exactly as given so JSON profiles remain valid.\n- Log an INFO message with the absolute path of the generated file and, if provided, a short summary from context.\n\nRegistration:\n- At the bottom of the module, import ActionRegistry and register the action:\n  from .registry import ActionRegistry\n  ActionRegistry.register(GenerateProfileFileAction)\n\nCoding style:\n- Type annotate validate/execute methods (-> bool / -> None).\n- Use pathlib.Path for path handling.\n- Use a module-level logger (logging.getLogger(__name__)).\n- No unused imports.\n\nRefactor logic for existing action modules:\n- If agent_input.refactor.original_code is provided for core/actions/generate_profile_file.py:\n  - Preserve the public contract: action_type value (\"generate_profile_file\"), ActionRegistry.register(...) call, and expected params structure (target_path, content, context).\n  - You MAY improve validation, logging, or internal implementation details.\n  - Do NOT change the meaning of the parameters or the overall behaviour (\"write exactly this content into the target file under project root\").\n  - The goal is to refine the action, not to break callers. Use from .base_action import BaseAction"
+    },
+    {
+      "profile_name": "code_refactor",
+      "class_name": "core/actions/__init__.py",
+      "refactor_class": "core/actions/__init__.py",
+      "task_description": "Refactor core/actions/__init__.py to ensure the new action module generate_profile_file is imported so it can self-register in the ActionRegistry.\n\nRequirements:\n- Keep the existing import of generate_class_file:\n  from . import generate_class_file  # noqa: F401\n- Keep git_commit_and_push commented out if it is currently commented:\n  # from . import git_commit_and_push  # noqa: F401\n- Preserve imports for generate_test_file and continue_action if they exist.\n- Add an import for the new profile action:\n  from . import generate_profile_file  # noqa: F401\n- Do NOT remove or rename any existing imports.\n- Do NOT change other module-level behavior; this file should only be responsible for importing action modules so they can self-register.\n- Maintain consistent formatting and keep the # noqa: F401 comments."
+    }
+  ]
+}

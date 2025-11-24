@@ -28,7 +28,8 @@ from core.git.git_manager import GitManager
 ALLOWED_ACTION_TYPES = {
     "generate_class_file",
     "git_commit_and_push",
-    "generate_test_file"
+    "generate_test_file",
+    "continue"
 }
 
 

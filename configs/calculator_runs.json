@@ -11,10 +11,12 @@
       "task_description": "Add logging to this calculator"
     },
     {
-  "profile_name": "framework_action_generator",
-  "class_name": "core/actions/generate_test_file.py",
-  "task_description": "Generate a new action class module under core/actions/generate_test_file.py.\n\nRequirements:\n- Define class GenerateTestFileAction(BaseAction) with action_type = \"generate_test_file\".\n- Expected params in self.params:\n  {\n    \"target_path\": string,   // e.g. \"tests/test_calculator.py\"\n    \"code\": string,          // full test source code\n    \"context\": string        // explanation of what is being tested\n  }\n\nvalidate(self):\n- Return True only if target_path is a non-empty string and code is a non-empty string.\n\nexecute(self, ctx):\n- Resolve target_path relative to ctx.project_root via pathlib.Path.\n- Ensure parent directory exists (mkdir(parents=True, exist_ok=True)).\n- Use ctx.class_generator to write the file with a CONTEXT header:\n  - Temporarily set class_generator.base_path to the parent directory of target_path.\n  - Call generate_with_comments(filename=<basename>, content=code, comments=context).\n  - Restore original base_path.\n- Log an info message with the absolute path of the generated test file.\n\nRegistration:\n- At the bottom of the module, import ActionRegistry and register the action:\n  from .registry import ActionRegistry\n  ActionRegistry.register(GenerateTestFileAction)\n\nCoding style:\n- Type annotate validate/execute methods.\n- Use clear variable names and logging messages.\n- No unused imports.\n\nRefactor logic for existing action modules:\n- If agent_input.refactor.original_code is provided for an existing action module (e.g. you are updating GenerateTestFileAction rather than creating it from scratch):\n  - Preserve the public contract: action_type value, ActionRegistry.register(...) call, and expected params structure.\n  - You MAY improve implementation details, logging, validation, or comments.\n  - Do NOT change the meaning of existing parameters or the overall behaviour of the action.\n  - The goal is to refine the action, not to break callers."
+  "profile_name": "security_scan",
+  "class_name": "core/calculator.py",
+  "refactor_class": "core/calculator.py",
+  "task_description": "Perform a security scan of core/calculator.py. If you find no meaningful security vulnerabilities, allow the run to continue (should_break = false). If you find any medium or high severity issue, set should_break = true and explain briefly in 'reason'."
 }
+
 
   ]
 }
