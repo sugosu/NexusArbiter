@@ -162,12 +162,26 @@ def main(
 
     # Inject agent_input into the messages using a simple ${agent_input} placeholder.
     # Profiles are expected to reference this placeholder in one or more messages.
+# Inject agent_input and task_description into the messages.
+# Profiles are expected to reference these placeholders in one or more messages.
     agent_input_json = json.dumps(agent_input, ensure_ascii=False, indent=2)
 
     for msg in params.get("messages", []):
         content = msg.get("content")
-        if isinstance(content, str) and "${agent_input}" in content:
-            msg["content"] = content.replace("${agent_input}", agent_input_json)
+
+        if not isinstance(content, str):
+            continue
+
+        # Inject runtime JSON
+        if "${agent_input}" in content:
+            content = content.replace("${agent_input}", agent_input_json)
+
+        # Inject human task description
+        if "${task_description}" in content:
+            content = content.replace("${task_description}", task_description or "")
+
+        msg["content"] = content
+
 
     logger.info(f"Calling OpenAI for profile '{profile_name}'")
     response = client.send_request(body=params)
