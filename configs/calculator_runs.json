@@ -1,0 +1,14 @@
+{
+  "runs": [
+    {
+      "profile_name": "code_generation",
+      "class_name": "core/calculator.py",
+      "task_description": "Create me a basic calculator"
+    },
+    {
+      "profile_name": "code_refactor",
+      "class_name": "core/calculator.py",
+      "task_description": "Add logging to this calculator"
+    }
+  ]
+}

@@ -28,6 +28,7 @@ from core.git.git_manager import GitManager
 ALLOWED_ACTION_TYPES = {
     "generate_class_file",
     "git_commit_and_push",
+    "generate_test_file"
 }
 
 
@@ -74,7 +75,14 @@ def execute_actions(actions_list: list, ctx: ActionContext) -> None:
 # Main entry point from main.py
 # ---------------------------------------------------------------------------
 
-def main(profile_name: str, class_name: str = "", refactor_class: str = "") -> None:
+def main(
+    profile_name: str,
+    class_name: str = "",
+    refactor_class: str = "",
+    task_description: str = "",
+    run_params: Optional[Mapping[str, Any]] = None,
+) -> None:
+
     """
     High-level orchestration:
 

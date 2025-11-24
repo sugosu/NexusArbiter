@@ -2,38 +2,39 @@
 from dotenv import load_dotenv
 import argparse
 
-load_dotenv()  # load .env once at entry point
+from app.app import main as app_main
+from core.config.run_config import RunConfig
 
-from app.app import main
+load_dotenv()  # load .env once at entry point
 
 
 def parse_args():
     parser = argparse.ArgumentParser(description="AI Code Generation Framework")
     parser.add_argument(
-        "--profile",
+        "--config",
         type=str,
         required=True,
-        help="Name of the AI profile to use (e.g. code_generation, fast_chat)",
+        help="Path to a JSON config file describing one or more runs.",
     )
-    parser.add_argument(
-        "--classname",
-        type=str,
-        required=False,
-        help="File name to generate",
-    )
-    parser.add_argument(
-        "--refactorclass",
-        type=str,
-        required=False,
-        help="File name to refactor",
-    )            
     return parser.parse_args()
 
 
 if __name__ == "__main__":
     args = parse_args()
-    main(
-    profile_name=args.profile,
-    class_name=args.classname,
-    refactor_class=args.refactorclass
-)
+
+    config = RunConfig.from_file(args.config)
+
+    for idx, run in enumerate(config.runs, start=1):
+        print(
+            f"[RUN {idx}] profile={run.profile_name}, "
+            f"class_name={run.class_name}, "
+            f"refactor_class={run.refactor_class}"
+        )
+
+        app_main(
+            profile_name=run.profile_name,
+            class_name=run.class_name,
+            refactor_class=run.refactor_class,
+            task_description=run.task_description,
+            run_params=run.raw or {},
+        )
