@@ -1,0 +1,25 @@
+{
+  "runs": [
+    {
+      "profile_name": "project_manifest_generator",
+      "task_description": "Design a project manifest for a small Python CLI todo list manager used as a test project for aiAgency. The manifest must strictly follow the specified schema and describe modules for a CLI interface, a task management service, a storage layer using a local JSON file, and tests for core behaviour.",
+      "context_file": [
+        "context_files/profiles/project_manifest_generator.json"
+      ],
+      "target_file": "",
+      "agent_input": {
+        "goal": "Design a project manifest for a small Python command-line todo list manager. The application runs as a CLI, lets users add, list, complete, and delete tasks stored in a local JSON file, and should be structured into modules for the CLI interface, a task service, a persistence layer, and tests.",
+        "language": "python",
+        "root_path": "app",
+        "target_manifest_path": "manifests/test_todo_manifest.json"
+      },
+      "rules": [],
+      "retry": 0,
+      "retry_context_files": [],
+      "allowed_actions": [
+        "generate_profile_file"
+      ],
+      "extra_params": {}
+    }
+  ]
+}

@@ -18,3 +18,5 @@ venv/
 
 # this is for myself
 merge_py.py
+
+*.txt
