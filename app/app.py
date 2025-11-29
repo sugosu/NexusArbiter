@@ -1,16 +1,13 @@
 # app/app.py
 from __future__ import annotations
-
 import json
 import os
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Mapping, Optional
+from typing import Any, Dict, List
 
 from core.logger import BasicLogger
 from core.ai_client.ai_client import OpenAIClient
-from core.ai_client.api_param_generator import AIParamGenerator
-from core.ai_client.ai_profile_loader import AIProfileLoader
 from core.ai_client.ai_response_parser import AIResponseParser
 
 from core.files.class_generator import ClassGenerator
@@ -19,7 +16,31 @@ from core.files.class_reader import PythonFileReader
 from core.git.repo_config import RepoConfig
 from core.git.git_client import GitClient
 from core.git.git_manager import GitManager
+from core.config.run_config import RunItem  # optional, only if you want type hints
 
+def build_rules_block_for_run(run_item: RunItem) -> str:
+    """
+    Build the rules block string for this run.
+
+    - Uses only per-run rules from runs.json (run_item.rules).
+    - Optionally you can define a few global rules in base_rules.
+    - Deduplicates while preserving order.
+    """
+    # Optional global rules you want every call to obey.
+    base_rules: List[str] = [
+        # Example (you can remove or edit these):
+        "Always respond strictly in the required JSON envelope.",
+        "Never output markdown or prose outside the specified JSON format.",
+    ]
+
+    run_rules = run_item.rules or []
+
+    combined: List[str] = []
+    for r in base_rules + run_rules:
+        if r not in combined:
+            combined.append(r)
+
+    return "\n".join(f"- {r}" for r in combined)
 
 # ---------------------------------------------------------------------------
 # Runtime context for action execution
@@ -77,22 +98,22 @@ def execute_actions(actions_list: list, ctx: ActionContext) -> None:
 # ---------------------------------------------------------------------------
 
 def main(
-    profile_name: str,
-    class_name: str = "",
-    refactor_class: str = "",
-    task_description: str = "",
-    run_params: Optional[Mapping[str, Any]] = None,
-) -> None:
-
+    profile_name,
+    class_name,
+    task_description,
+    refactor_class,
+    agent_input,
+    run_item,
+    run_params,
+):
     """
     High-level orchestration:
 
     1. Build runtime / Git / AI clients.
-    2. Load profile presets.
-    3. Build agent_input (runtime info + optional refactor code).
-    4. Inject ${agent_input} into the profile messages.
-    5. Call OpenAI, expecting an 'agent' JSON object.
-    6. Execute actions returned under agent.actions[].
+    2. Build agent_input (runtime info + optional refactor code).
+    3. Inject ${agent_input}, ${task_description}, ${rules_block} into run_params['messages'].
+    4. Call OpenAI, expecting an 'agent' JSON object.
+    5. Execute actions returned under agent.actions[].
     """
     project_root = Path(__file__).resolve().parents[1]
     logger = BasicLogger(__name__).get_logger()
@@ -116,28 +137,8 @@ def main(
 
     client = OpenAIClient(api_key=api_key)
 
-    # --- PROFILE LOADING -----------------------------------------------
-    profiles_dir = project_root / "profiles"
-    profile_loader = AIProfileLoader(
-        profiles_dir=profiles_dir,
-        default_user="onat",
-    )
-    presets = profile_loader.load_profiles()
-
-    if profile_name not in presets:
-        raise ValueError(
-            f"Profile '{profile_name}' not found. "
-            f"Available profiles: {', '.join(presets.keys())}"
-        )
-
-    param_gen = AIParamGenerator(
-        client=client,
-        presets=presets,
-        default_user="onat",
-    )
-
     # --- BUILD agent_input RUNTIME OBJECT ------------------------------
-    agent_input: Dict[str, Any] = {
+    agent_input_obj: Dict[str, Any] = {
         "profile_name": profile_name,
         "class_name": class_name or None,
         "refactor_class": refactor_class or None,
@@ -153,39 +154,52 @@ def main(
             logger.error(f"Could not read refactor_class '{refactor_class}': {exc}")
             original_code = ""
 
-        agent_input["refactor"] = {
+        agent_input_obj["refactor"] = {
             "file_path": refactor_class,
             "original_code": original_code,
         }
 
-    # --- BUILD REQUEST PAYLOAD FROM PROFILE ----------------------------
-    params = param_gen.build_params(profile_name)
+    # Merge any extra agent_input passed from the run (optional)
+    if isinstance(agent_input, dict) and agent_input:
+        agent_input_obj.update(agent_input)
 
-    # Inject agent_input into the messages using a simple ${agent_input} placeholder.
-    # Profiles are expected to reference this placeholder in one or more messages.
-# Inject agent_input and task_description into the messages.
-# Profiles are expected to reference these placeholders in one or more messages.
-    agent_input_json = json.dumps(agent_input, ensure_ascii=False, indent=2)
+    if run_item.target_file:
+        agent_input_obj["target_file"] = run_item.target_file    
 
-    for msg in params.get("messages", []):
+    # --- RULES + PLACEHOLDER INJECTION ---------------------------------
+    # run_params MUST already be a valid OpenAI payload:
+    # {
+    #   "model": "...",
+    #   "messages": [...],
+    #   "temperature": ...,
+    #   ...
+    # }
+    agent_input_json = json.dumps(agent_input_obj, ensure_ascii=False, indent=2)
+    rules_block = build_rules_block_for_run(run_item)
+
+    for msg in run_params.get("messages", []):
         content = msg.get("content")
-
         if not isinstance(content, str):
             continue
 
-        # Inject runtime JSON
         if "${agent_input}" in content:
             content = content.replace("${agent_input}", agent_input_json)
 
-        # Inject human task description
         if "${task_description}" in content:
             content = content.replace("${task_description}", task_description or "")
+
+        if "${rules_block}" in content:
+            content = content.replace("${rules_block}", rules_block)
+
+    # 🔒 New: inject target_file
+        if "${target_file}" in content:
+            content = content.replace("${target_file}", run_item.target_file or "")
 
         msg["content"] = content
 
 
     logger.info(f"Calling OpenAI for profile '{profile_name}'")
-    response = client.send_request(body=params)
+    response = client.send_request(body=run_params)
 
     # --- PARSE AGENT + ACTIONS -----------------------------------------
     agent_obj = AIResponseParser.extract_agent(response)
@@ -193,14 +207,13 @@ def main(
         logger.error("Model did not return a valid 'agent' object. Aborting.")
         return
 
-
     actions = agent_obj.get("actions", [])
     if not isinstance(actions, list) or not actions:
         logger.warning(
             "No actions returned by the model. Parsed agent object: %r", agent_obj
         )
         return
-    
+
     # --- EXECUTE ACTIONS -----------------------------------------------
     runtime_ctx = ActionRuntimeContext(
         project_root=project_root,
@@ -211,5 +224,5 @@ def main(
     )
 
     execute_actions(actions, runtime_ctx)
-
     logger.info("All actions executed.")
+

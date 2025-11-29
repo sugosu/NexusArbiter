@@ -58,7 +58,7 @@ class OpenAIClient:
         self,
         body: Dict[str, Any],
         headers: Optional[Dict[str, str]] = None,
-        timeout: int = 30,
+        timeout: int = 120,
     ) -> Dict[str, Any]:
         """
         Sends a POST request to the OpenAI API with the provided body and headers.

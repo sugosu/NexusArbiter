@@ -1,7 +1,6 @@
 # === CONTEXT START ===
-# This file defines a Calculator class with basic arithmetic operations: addition,
-# subtraction, multiplication, and division. The division method handles division
-# by zero by raising a ValueError.
+# Implemented a Calculator class with basic arithmetic operations and error
+# handling for division by zero.
 # === CONTEXT END ===
 
 class Calculator:

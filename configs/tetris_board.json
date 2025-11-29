@@ -1,0 +1,16 @@
+{
+  "runs": [
+    {
+      "profile_name": "code_generation",
+      "class_name": "tetris/core/board.py",
+      "task_description": "Board class: Create a class that manages the Tetris board state, including methods for checking collisions, placing pieces, clearing lines, and rendering the board.",
+      "agent_input": {
+        "context_files": [
+          "core/tetris_orchestrator.py"
+        ],
+        "goal": "Generate the Board class."
+      },
+      "rules": []
+    }
+  ]
+}

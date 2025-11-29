@@ -1,0 +1,15 @@
+{
+  "runs": [
+    {
+      "profile_name": "project_manifest_generator",
+      "class_name": "project/project_manifest_tetris.json",
+      "task_description": "Design a complete Project Manifest for a Tetris game implemented in Python using the aiAgency framework. The manifest must follow the required project manifest schema with project_name, description, language, root_path, modules (with classes, fields, and methods), and tests. Model a clean, modular architecture for a terminal-based or simple graphical Tetris game, including configuration, tetromino representation, board management, rendering, input handling, game loop/control, and any supporting utilities. The final manifest JSON must be suitable for code generation and test generation, and it must be written to project/project_manifest_tetris.json.",
+      "extra_params": {
+        "goal": "Design a complete, modular Tetris game architecture in Python and express it as a single Project Manifest JSON suitable for aiAgency code generation.",
+        "language": "python",
+        "root_path": "tetris",
+        "target_manifest_path": "project/project_manifest_tetris.json"
+      }
+    }
+  ]
+}
