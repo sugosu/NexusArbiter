@@ -27,14 +27,10 @@ class GenerateProfileFileAction(BaseAction):
     def execute(self, ctx) -> None:
         target_path = self.params['target_path']
         content = self.params['content']
-        context = self.params.get('context', '')
+        _context = self.params.get('context', '')
 
-        full_path = Path(ctx.project_root) / target_path
-        full_path.parent.mkdir(parents=True, exist_ok=True)
+        full_path = ctx.file_writer.write_file(target_path, content)
+        logger.info(f"[generate_profile_file] Wrote profile file at {full_path}")
 
-        with full_path.open('w', encoding='utf-8') as file:
-            file.write(content)
-
-        logger.info(f"Generated file at {full_path.absolute()}. {context}")
 
 ActionRegistry.register(GenerateProfileFileAction)

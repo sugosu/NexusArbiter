@@ -1,17 +1,21 @@
 # main.py
-from dotenv import load_dotenv
+from __future__ import annotations
+
 import argparse
-
-from app.app import main as app_main
-from core.config.run_config import RunConfig
 from pathlib import Path
-import json
+from typing import Optional
 
-load_dotenv()  # load .env once at entry point
+from dotenv import load_dotenv
+
+from core.config.run_config import RunConfig
+from core.runtime.run_executor import RunExecutor
+
+# Load .env once at entry point
+load_dotenv()
 
 
-def parse_args():
-    parser = argparse.ArgumentParser(description="AI Code Generation Framework")
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="aiAgency – AI Code Generation Framework")
     parser.add_argument(
         "--config",
         type=str,
@@ -20,32 +24,6 @@ def parse_args():
     )
     return parser.parse_args()
 
-def load_context_params(project_root: Path, context_files: list[str]) -> dict:
-    """
-    Load one or more context/profile JSON files and merge them into a single
-    OpenAI payload dict.
-
-    For now:
-    - Use the first file as the base.
-    - Ignore the rest (you can extend to deep-merge later if needed).
-    """
-    if not context_files:
-        raise ValueError("Run is missing 'context_file'. At least one path is required.")
-
-    first = context_files[0]
-    context_path = (project_root / first).resolve()
-
-    if not context_path.exists():
-        raise FileNotFoundError(f"context_file not found: {context_path}")
-
-    with context_path.open("r", encoding="utf-8") as f:
-        params = json.load(f)
-
-    if not isinstance(params, dict):
-        raise ValueError(f"context_file must contain a JSON object: {context_path}")
-
-    return params
-
 
 if __name__ == "__main__":
     args = parse_args()
@@ -53,42 +31,74 @@ if __name__ == "__main__":
     project_root = Path(__file__).resolve().parent
     config = RunConfig.from_file(args.config)
 
-    for idx, run in enumerate(config.runs, start=1):
-        print(
-            f"[RUN {idx}] "
-            f"profile={run.profile_name}, "
-            f"class_name={run.class_name}, "
-            f"refactor_class={run.refactor_class}, "
-            f"context_file={run.context_file}, "
-            f"target_file={run.target_file}"
+    executor = RunExecutor(project_root=project_root)
+
+    total_runs = len(config.runs)
+    retry_from: Optional[int] = getattr(config, "retry_from", None)
+
+    # Ensure retry_from is within [1, total_runs] if present
+    if retry_from is not None:
+        retry_from = max(1, min(retry_from, total_runs))
+
+    # Pipeline control
+    idx = 1                      # 1-based current run index
+    pipeline_retried = False     # allow only a single pipeline-level restart
+    restart_from_index: Optional[int] = None  # where to restart AND force retry_context
+
+    while idx <= total_runs:
+        run = config.runs[idx - 1]
+
+        # If we just restarted the pipeline from a specific index,
+        # then for that first run we want retry_context_files to override
+        # the normal context_file from the very first attempt.
+        use_retry_ctx_first = restart_from_index is not None and idx == restart_from_index
+
+        # Consume the flag so it applies only to this first restarted run.
+        if use_retry_ctx_first:
+            restart_from_index = None
+
+        result = executor.execute(
+            run=run,
+            run_index=idx,
+            use_retry_context_on_first_attempt=use_retry_ctx_first,
         )
 
-        agent_input = dict(run.agent_input or {})
-
-# 🔒 target_file from RunItem is the single source of truth
-        if run.target_file:
-            agent_input["target_file"] = run.target_file
-
-
-        # Build run_params from context_file (new style)
-        if run.context_file:
-            run_params = load_context_params(project_root, run.context_file)
+        status = "OK" if result.success else "FAILED"
+        if result.retried:
+            print(
+                f"[RUN {idx}] finished with status {status} after {result.attempts} attempts. "
+                f"Retry reason (last): {result.last_retry_reason or '<none>'}."
+            )
         else:
-            # If no context_file is provided, you can either:
-            # - raise, or
-            # - fall back to the old behaviour.
-            raise ValueError(
-                "Run is missing 'context_file'; new engine requires context_file-based runs."
+            print(
+                f"[RUN {idx}] finished with status {status} after {result.attempts} attempts."
             )
 
-        app_main(
-            profile_name=run.profile_name,
-            class_name=run.class_name,
-            task_description=run.task_description,
-            refactor_class=run.refactor_class,
-            agent_input=agent_input,
-            run_item=run,
-            run_params=run_params,
-        )
+        # Pipeline-level retry_from logic:
+        #
+        # If:
+        #   - this run did NOT succeed,
+        #   - the RunExecutor reports that the agent requested retry at some point
+        #     (result.retried == True), and
+        #   - the config defines retry_from,
+        #   - and we have not yet used the pipeline-level restart,
+        # then:
+        #   - restart the pipeline from retry_from,
+        #   - and for that first restarted run, force use of retry_context_files.
+        if (
+            not result.success
+            and result.retried
+            and retry_from is not None
+            and not pipeline_retried
+        ):
+            print(
+                f"[RUN {idx}] pipeline-level retry_from triggered; "
+                f"restarting from run index {retry_from} "
+                f"using retry_context_files for that run (if configured)."
+            )
+            pipeline_retried = True
+            restart_from_index = retry_from
+            idx = retry_from
+            continue
 
-
+        idx += 1

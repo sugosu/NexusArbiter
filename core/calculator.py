@@ -1,26 +1,28 @@
 # === CONTEXT START ===
-# This file defines a Calculator class with basic arithmetic operations: addition,
-# subtraction, multiplication, and division. The division method handles division
-# by zero by raising a ValueError.
+# This module defines a reusable Calculator class in Python.
+# The class provides basic arithmetic operations such as addition,
+# subtraction, multiplication, and division.
 # === CONTEXT END ===
 
 class Calculator:
-    """A simple calculator class to perform basic arithmetic operations."""
+    """
+    A simple calculator class to perform basic arithmetic operations.
+    """
 
-    def add(self, a: float, b: float) -> float:
+    def add(self, a, b):
         """Return the sum of a and b."""
         return a + b
 
-    def subtract(self, a: float, b: float) -> float:
+    def subtract(self, a, b):
         """Return the difference of a and b."""
         return a - b
 
-    def multiply(self, a: float, b: float) -> float:
+    def multiply(self, a, b):
         """Return the product of a and b."""
         return a * b
 
-    def divide(self, a: float, b: float) -> float:
-        """Return the division of a by b. Raise ValueError if b is zero."""
+    def divide(self, a, b):
+        """Return the quotient of a and b. Raises ValueError on division by zero."""
         if b == 0:
             raise ValueError("Cannot divide by zero.")
         return a / b

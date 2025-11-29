@@ -40,7 +40,6 @@ class RunItem:
     class_name: Optional[str] = None           # optional in new mode
     task_description: str = ""                 # still required logically
 
-    refactor_class: str = ""                   # used by main.py / app.main
     rules: List[str] = field(default_factory=list)
     extra_params: Dict[str, Any] = field(default_factory=dict)
     agent_input: Dict[str, Any] = field(default_factory=dict)
@@ -49,9 +48,13 @@ class RunItem:
     context_file: List[str] = field(default_factory=list)
     target_file: str = ""
 
+    # RETRY / CONTROL FIELDS (per-run)
+    retry: int = 0
+    retry_context_files: List[str] = field(default_factory=list)
+    allowed_actions: List[str] = field(default_factory=list)
+
     # full raw dict for future use
     raw: Dict[str, Any] = field(default_factory=dict)
-
 
 
 class RunConfig:
@@ -60,12 +63,27 @@ class RunConfig:
 
     Supported root structures:
 
-    1) { "runs": [ { ... }, { ... } ] }
-    2) [ { ... }, { ... } ]
+    1) {
+         "retry_from": 2,          # optional pipeline-level restart index (1-based)
+         "runs": [ { ... }, ... ]
+       }
+
+    2) { ... }                     # single run object
+
+    3) [ { ... }, { ... } ]        # array of runs
+
+    Notes:
+    - retry_from, if present and >= 1, is stored as `self.retry_from` (int).
+    - If retry_from is omitted or invalid, `self.retry_from` is None.
     """
 
-    def __init__(self, runs: List[RunItem]) -> None:
+    def __init__(self, runs: List[RunItem], retry_from: Optional[int] = None) -> None:
         self.runs = runs
+        self.retry_from = retry_from
+
+    # ------------------------------------------------------------------ #
+    # Factory
+    # ------------------------------------------------------------------ #
 
     @staticmethod
     def from_file(path: str) -> "RunConfig":
@@ -80,16 +98,34 @@ class RunConfig:
 
     @staticmethod
     def _parse(data: Any) -> "RunConfig":
+        # Determine the list of run items and (optionally) retry_from at root
+        retry_from_raw: Optional[Any] = None
+
         if isinstance(data, dict):
             if "runs" in data and isinstance(data["runs"], list):
                 items = data["runs"]
             else:
                 # Single run as object
                 items = [data]
+
+            # Optional pipeline-level retry_from at root
+            retry_from_raw = data.get("retry_from")
+
         elif isinstance(data, list):
             items = data
+            retry_from_raw = None
         else:
             raise ValueError("Config root must be an object or an array.")
+
+        # Normalise retry_from
+        retry_from: Optional[int] = None
+        if retry_from_raw is not None:
+            try:
+                candidate = int(retry_from_raw)
+                if candidate >= 1:
+                    retry_from = candidate
+            except (TypeError, ValueError):
+                retry_from = None
 
         runs: List[RunItem] = []
 
@@ -103,12 +139,28 @@ class RunConfig:
             if has_context:
                 # NEW MODE: context_file + target_file + task_description
                 # profile_name/class_name become optional/logging-only.
-                profile_name = _get_field(item, "profile_name", required=False, default="")
-                class_name = _get_field(item, "class_name", required=False, default=None)
-                task_description = _get_field(item, "task_description", required=True)
+                profile_name = _get_field(
+                    item,
+                    "profile_name",
+                    required=False,
+                    default="",
+                )
+                class_name = _get_field(
+                    item,
+                    "class_name",
+                    required=False,
+                    default=None,
+                )
+                task_description = _get_field(
+                    item,
+                    "task_description",
+                    required=True,
+                )
 
                 # Normalize context_file to a list[str]
-                context_file_raw = item.get("context_file") or item.get("context_files") or []
+                context_file_raw = (
+                    item.get("context_file") or item.get("context_files") or []
+                )
                 if isinstance(context_file_raw, str):
                     context_file = [context_file_raw]
                 elif isinstance(context_file_raw, list):
@@ -120,23 +172,11 @@ class RunConfig:
 
                 target_file = str(item.get("target_file", ""))
 
-                refactor_class = _get_field(
-                    item, "refactor_class", required=False, default=""
-                )
-
             else:
                 # OLD MODE: profile_name/class_name/task_description required
                 profile_name = _get_field(item, "profile_name", required=True)
                 class_name = _get_field(item, "class_name", required=True)
                 task_description = _get_field(item, "task_description", required=True)
-                refactor_class = _get_field(
-                    item, "refactor_class", required=False, default=""
-                )
-
-                # Heuristic: for refactor-type profiles, if no explicit refactor_class is
-                # provided, assume we refactor the same file as class_name.
-                if not refactor_class and "refactor" in str(profile_name).lower():
-                    refactor_class = class_name
 
                 context_file = []   # none in old mode
                 target_file = ""    # none in old mode
@@ -146,20 +186,48 @@ class RunConfig:
             extra_params = item.get("extra_params", {})
             agent_input = item.get("agent_input", {})
 
+            # Retry + control fields (per-run)
+            retry_raw = item.get("retry", 0)
+            try:
+                retry = int(retry_raw)
+            except (TypeError, ValueError):
+                retry = 0
+
+            retry_ctx_raw = item.get("retry_context_files") or []
+            if isinstance(retry_ctx_raw, str):
+                retry_context_files = [retry_ctx_raw]
+            elif isinstance(retry_ctx_raw, list):
+                retry_context_files = [str(x) for x in retry_ctx_raw]
+            else:
+                retry_context_files = []
+
+            allowed_actions_raw = item.get("allowed_actions") or []
+            if isinstance(allowed_actions_raw, str):
+                allowed_actions = [allowed_actions_raw]
+            elif isinstance(allowed_actions_raw, list):
+                allowed_actions = [str(x) for x in allowed_actions_raw]
+            else:
+                allowed_actions = []
+
             runs.append(
                 RunItem(
                     profile_name=str(profile_name),
                     class_name=str(class_name) if class_name is not None else None,
                     task_description=str(task_description),
-                    refactor_class=str(refactor_class) if refactor_class is not None else "",
                     rules=list(rules) if isinstance(rules, list) else [],
-                    extra_params=dict(extra_params) if isinstance(extra_params, dict) else {},
-                    agent_input=dict(agent_input) if isinstance(agent_input, dict) else {},
+                    extra_params=(
+                        dict(extra_params) if isinstance(extra_params, dict) else {}
+                    ),
+                    agent_input=(
+                        dict(agent_input) if isinstance(agent_input, dict) else {}
+                    ),
                     context_file=context_file,
                     target_file=target_file,
+                    retry=retry,
+                    retry_context_files=retry_context_files,
+                    allowed_actions=allowed_actions,
                     raw=dict(item),
                 )
             )
 
-
-        return RunConfig(runs)
+        return RunConfig(runs=runs, retry_from=retry_from)

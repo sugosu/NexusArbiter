@@ -4,10 +4,11 @@ from typing import Any, Dict, Mapping
 @dataclass
 class ActionContext:
     project_root: Any
-    class_generator: Any
+    file_writer: Any        # <- was class_generator
     git_manager: Any
     repo_config: Any
     logger: Any
+
 
 class BaseAction:
     """

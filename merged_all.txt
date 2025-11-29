@@ -4,19 +4,22 @@ FILE: C:\projects\aiAgency\main.py
 ================================================================================
 
 # main.py
-from dotenv import load_dotenv
+from __future__ import annotations
+
 import argparse
-
-from app.app import main as app_main
-from core.config.run_config import RunConfig
 from pathlib import Path
-import json
 
-load_dotenv()  # load .env once at entry point
+from dotenv import load_dotenv
+
+from core.config.run_config import RunConfig
+from core.runtime.run_executor import RunExecutor
+
+# Load .env once at entry point
+load_dotenv()
 
 
-def parse_args():
-    parser = argparse.ArgumentParser(description="AI Code Generation Framework")
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="aiAgency – AI Code Generation Framework")
     parser.add_argument(
         "--config",
         type=str,
@@ -25,32 +28,6 @@ def parse_args():
     )
     return parser.parse_args()
 
-def load_context_params(project_root: Path, context_files: list[str]) -> dict:
-    """
-    Load one or more context/profile JSON files and merge them into a single
-    OpenAI payload dict.
-
-    For now:
-    - Use the first file as the base.
-    - Ignore the rest (you can extend to deep-merge later if needed).
-    """
-    if not context_files:
-        raise ValueError("Run is missing 'context_file'. At least one path is required.")
-
-    first = context_files[0]
-    context_path = (project_root / first).resolve()
-
-    if not context_path.exists():
-        raise FileNotFoundError(f"context_file not found: {context_path}")
-
-    with context_path.open("r", encoding="utf-8") as f:
-        params = json.load(f)
-
-    if not isinstance(params, dict):
-        raise ValueError(f"context_file must contain a JSON object: {context_path}")
-
-    return params
-
 
 if __name__ == "__main__":
     args = parse_args()
@@ -58,45 +35,21 @@ if __name__ == "__main__":
     project_root = Path(__file__).resolve().parent
     config = RunConfig.from_file(args.config)
 
+    executor = RunExecutor(project_root=project_root)
+
     for idx, run in enumerate(config.runs, start=1):
-        print(
-            f"[RUN {idx}] "
-            f"profile={run.profile_name}, "
-            f"class_name={run.class_name}, "
-            f"refactor_class={run.refactor_class}, "
-            f"context_file={run.context_file}, "
-            f"target_file={run.target_file}"
-        )
+        result = executor.execute(run=run, run_index=idx)
 
-        agent_input = dict(run.agent_input or {})
-
-# 🔒 target_file from RunItem is the single source of truth
-        if run.target_file:
-            agent_input["target_file"] = run.target_file
-
-
-        # Build run_params from context_file (new style)
-        if run.context_file:
-            run_params = load_context_params(project_root, run.context_file)
-        else:
-            # If no context_file is provided, you can either:
-            # - raise, or
-            # - fall back to the old behaviour.
-            raise ValueError(
-                "Run is missing 'context_file'; new engine requires context_file-based runs."
+        status = "OK" if result.success else "FAILED"
+        if result.retried:
+            print(
+                f"[RUN {idx}] finished with status {status} after {result.attempts} attempts. "
+                f"Retry reason (last): {result.last_retry_reason or '<none>'}."
             )
-
-        app_main(
-            profile_name=run.profile_name,
-            class_name=run.class_name,
-            task_description=run.task_description,
-            refactor_class=run.refactor_class,
-            agent_input=agent_input,
-            run_item=run,
-            run_params=run_params,
-        )
-
-
+        else:
+            print(
+                f"[RUN {idx}] finished with status {status} after {result.attempts} attempts."
+            )
 
 
 
@@ -153,232 +106,39 @@ FILE: C:\projects\aiAgency\app\app.py
 
 # app/app.py
 from __future__ import annotations
-import json
-import os
-from dataclasses import dataclass
+
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, Optional
 
-from core.logger import BasicLogger
-from core.ai_client.ai_client import OpenAIClient
-from core.ai_client.ai_response_parser import AIResponseParser
+from core.config.run_config import RunItem
+from core.runtime.app_runner import AppRunner, RunResult
 
-from core.files.class_generator import ClassGenerator
-from core.files.class_reader import PythonFileReader
-
-from core.git.repo_config import RepoConfig
-from core.git.git_client import GitClient
-from core.git.git_manager import GitManager
-from core.config.run_config import RunItem  # optional, only if you want type hints
-
-def build_rules_block_for_run(run_item: RunItem) -> str:
-    """
-    Build the rules block string for this run.
-
-    - Uses only per-run rules from runs.json (run_item.rules).
-    - Optionally you can define a few global rules in base_rules.
-    - Deduplicates while preserving order.
-    """
-    # Optional global rules you want every call to obey.
-    base_rules: List[str] = [
-        # Example (you can remove or edit these):
-        "Always respond strictly in the required JSON envelope.",
-        "Never output markdown or prose outside the specified JSON format.",
-    ]
-
-    run_rules = run_item.rules or []
-
-    combined: List[str] = []
-    for r in base_rules + run_rules:
-        if r not in combined:
-            combined.append(r)
-
-    return "\n".join(f"- {r}" for r in combined)
-
-# ---------------------------------------------------------------------------
-# Runtime context for action execution
-# ---------------------------------------------------------------------------
-
-ALLOWED_ACTION_TYPES = {
-    "generate_class_file",
-    "git_commit_and_push",
-    "generate_test_file",
-    "continue"
-}
-
-
-@dataclass
-class ActionRuntimeContext:
-    """
-    Objects and configuration that actions may need at runtime.
-    This keeps 'main()' thin and the dispatcher generic.
-    """
-    project_root: Path
-    class_generator: ClassGenerator
-    git_manager: GitManager
-    repo_config: RepoConfig
-    logger: Any  # logging.Logger
-
-
-# ---------------------------------------------------------------------------
-# Action execution
-# ---------------------------------------------------------------------------
-
-from core.actions.registry import ActionRegistry
-from core.actions.base_action import ActionContext
-
-def execute_actions(actions_list: list, ctx: ActionContext) -> None:
-    logger = ctx.logger
-
-    for index, raw in enumerate(actions_list, start=1):
-        action = ActionRegistry.create(raw)
-        if action is None:
-            logger.warning(
-                f"Unknown or unregistered action '{raw.get('type')}'. "
-                f"Allowed: {ActionRegistry.allowed_types()}"
-            )
-            continue
-
-        if not action.validate():
-            logger.warning(f"Invalid params for action '{action.action_type}': {raw}")
-            continue
-
-        logger.info(f"Executing action #{index}: {action.action_type}")
-        action.execute(ctx)
-
-# ---------------------------------------------------------------------------
-# Main entry point from main.py
-# ---------------------------------------------------------------------------
 
 def main(
-    profile_name,
-    class_name,
-    task_description,
-    refactor_class,
-    agent_input,
-    run_item,
-    run_params,
-):
-    """
-    High-level orchestration:
-
-    1. Build runtime / Git / AI clients.
-    2. Build agent_input (runtime info + optional refactor code).
-    3. Inject ${agent_input}, ${task_description}, ${rules_block} into run_params['messages'].
-    4. Call OpenAI, expecting an 'agent' JSON object.
-    5. Execute actions returned under agent.actions[].
-    """
+    profile_name: str,
+    class_name: Optional[str],
+    task_description: str,
+    agent_input: Dict[str, Any],
+    run_item: RunItem,
+    run_params: Dict[str, Any],
+) -> Dict[str, bool]:
+    """Thin wrapper around AppRunner (kept for backward compatibility)."""
     project_root = Path(__file__).resolve().parents[1]
-    logger = BasicLogger(__name__).get_logger()
-    logger.info("Starting AI action dispatcher app")
+    runner = AppRunner(project_root=project_root)
 
-    # --- GIT SETUP -----------------------------------------------------
-    repo_config = RepoConfig(
-        repo_path=str(project_root),
-        default_branch="master",
-        remote_name="origin",
-        author_name="Onat Agent",
-        author_email="onat@gegeoglu.com",
+    result: RunResult = runner.run(
+        run_item=run_item,
+        run_params=run_params,
+        profile_name=profile_name,
+        class_name=class_name,
+        task_description=task_description,
+        agent_input_overrides=agent_input,
     )
-    git_client = GitClient(repo_path=repo_config.repo_path)
-    git_manager = GitManager(git_client=git_client)
 
-    # --- OPENAI CLIENT SETUP -------------------------------------------
-    api_key = os.getenv("OPENAI_API_KEY")
-    if not api_key:
-        raise RuntimeError("OPENAI_API_KEY is not set in .env")
-
-    client = OpenAIClient(api_key=api_key)
-
-    # --- BUILD agent_input RUNTIME OBJECT ------------------------------
-    agent_input_obj: Dict[str, Any] = {
-        "profile_name": profile_name,
-        "class_name": class_name or None,
-        "refactor_class": refactor_class or None,
+    return {
+        "success": result.success,
+        "retry_requested": result.retry_requested,
     }
-
-    # If refactor_class is provided, read its current content so the model
-    # does not have to perform filesystem I/O.
-    if refactor_class:
-        reader = PythonFileReader(refactor_class)
-        try:
-            original_code = reader.read_file()
-        except Exception as exc:
-            logger.error(f"Could not read refactor_class '{refactor_class}': {exc}")
-            original_code = ""
-
-        agent_input_obj["refactor"] = {
-            "file_path": refactor_class,
-            "original_code": original_code,
-        }
-
-    # Merge any extra agent_input passed from the run (optional)
-    if isinstance(agent_input, dict) and agent_input:
-        agent_input_obj.update(agent_input)
-
-    if run_item.target_file:
-        agent_input_obj["target_file"] = run_item.target_file    
-
-    # --- RULES + PLACEHOLDER INJECTION ---------------------------------
-    # run_params MUST already be a valid OpenAI payload:
-    # {
-    #   "model": "...",
-    #   "messages": [...],
-    #   "temperature": ...,
-    #   ...
-    # }
-    agent_input_json = json.dumps(agent_input_obj, ensure_ascii=False, indent=2)
-    rules_block = build_rules_block_for_run(run_item)
-
-    for msg in run_params.get("messages", []):
-        content = msg.get("content")
-        if not isinstance(content, str):
-            continue
-
-        if "${agent_input}" in content:
-            content = content.replace("${agent_input}", agent_input_json)
-
-        if "${task_description}" in content:
-            content = content.replace("${task_description}", task_description or "")
-
-        if "${rules_block}" in content:
-            content = content.replace("${rules_block}", rules_block)
-
-    # 🔒 New: inject target_file
-        if "${target_file}" in content:
-            content = content.replace("${target_file}", run_item.target_file or "")
-
-        msg["content"] = content
-
-
-    logger.info(f"Calling OpenAI for profile '{profile_name}'")
-    response = client.send_request(body=run_params)
-
-    # --- PARSE AGENT + ACTIONS -----------------------------------------
-    agent_obj = AIResponseParser.extract_agent(response)
-    if not agent_obj:
-        logger.error("Model did not return a valid 'agent' object. Aborting.")
-        return
-
-    actions = agent_obj.get("actions", [])
-    if not isinstance(actions, list) or not actions:
-        logger.warning(
-            "No actions returned by the model. Parsed agent object: %r", agent_obj
-        )
-        return
-
-    # --- EXECUTE ACTIONS -----------------------------------------------
-    runtime_ctx = ActionRuntimeContext(
-        project_root=project_root,
-        class_generator=ClassGenerator(base_path=str(project_root)),
-        git_manager=git_manager,
-        repo_config=repo_config,
-        logger=logger,
-    )
-
-    execute_actions(actions, runtime_ctx)
-    logger.info("All actions executed.")
-
 
 
 
@@ -390,50 +150,39 @@ FILE: C:\projects\aiAgency\app\__pycache__\__init__.py
 
 
 ================================================================================
-FILE: C:\projects\aiAgency\configs\calculator_runs.json
+FILE: C:\projects\aiAgency\context_files\actions\actions_spec.json
 ================================================================================
 
 {
-  "runs": [
+  "name": "actions_spec",
+  "description": "Definitions of available actions in aiAgency.",
+  "actions": [
     {
-      "profile_name": "code_generation",
-      "class_name": "core/calculator.py",
-      "task_description": "Create me a basic calculator"
+      "type": "file_write",
+      "purpose": "Write or replace a single file on disk.",
+      "rules": [
+        "Always produce a full file, not a patch.",
+        "Content must be valid for the target language.",
+        "The engine controls the actual target path; your params.target_path is ignored."
+      ]
     },
     {
-      "profile_name": "code_refactor",
-      "class_name": "core/calculator.py",
-      "task_description": "Add logging to this calculator"
+      "type": "continue",
+      "purpose": "Signal that you are not ready to produce a final artifact.",
+      "rules": [
+        "Use this when you need another planning or refinement step.",
+        "If you emit only a single 'continue' action, the engine will not execute side effects for this run.",
+        "Use this instead of generating placeholder code."
+      ]
     },
     {
-  "profile_name": "security_scan",
-  "class_name": "core/calculator.py",
-  "refactor_class": "core/calculator.py",
-  "task_description": "Perform a security scan of core/calculator.py. If you find no meaningful security vulnerabilities, allow the run to continue (should_break = false). If you find any medium or high severity issue, set should_break = true and explain briefly in 'reason'."
-}
-
-
-  ]
-}
-
-
-
-================================================================================
-FILE: C:\projects\aiAgency\configs\generate_action.json
-================================================================================
-
-{
-  "runs": [
-    {
-      "profile_name": "framework_action_generator",
-      "class_name": "core/actions/continue_action.py",
-      "task_description": "Generate or refactor a control-flow action module under core/actions/continue_action.py.\n\nSemantics:\n- The action is used to either:\n  - \"continue\" (no-op, script proceeds / ends normally), or\n  - \"break\" (abort the current run by raising an exception).\n\nClass and params:\n- Define class ContinueAction(BaseAction) with action_type = \"continue\".\n- Expected params in self.params:\n  {\n    \"should_break\": bool,   // if true, abort the run; if false, no-op\n    \"reason\": string | null // optional human-readable reason, used for logging and error message\n  }\n\nvalidate(self):\n- Return True only if:\n  - \"should_break\" is present and is a boolean, and\n  - \"reason\" is either a string or None / missing.\n\nexecute(self, ctx):\n- If should_break is False:\n  - Log an INFO message that the continue action is a no-op and the script will proceed normally.\n- If should_break is True:\n  - Log an ERROR message including the reason (if provided).\n  - Raise a RuntimeError with a message based on the reason (e.g. \"ContinueAction requested termination: <reason>\").\n\nRegistration:\n- At the bottom of the module, import ActionRegistry and register the action:\n  from .registry import ActionRegistry\n  ActionRegistry.register(ContinueAction)\n\nCoding style:\n- Type annotate validate/execute methods (-> bool / -> None).\n- Use clear variable names and precise logging messages.\n- No unused imports.\n\nRefactor logic for existing action modules:\n- If agent_input.refactor.original_code is provided for an existing continue_action module:\n  - Preserve the public contract: action_type value (\"continue\"), ActionRegistry.register(...) call, and expected params structure (should_break, reason).\n  - You MAY improve validation, logging, or internal implementation details.\n  - Do NOT change the meaning of should_break or the overall behavior of the action.\n  - The goal is to refine the action, not to break callers."
-    },
-    {
-      "profile_name": "code_refactor",
-      "class_name": "core/actions/__init__.py",
-      "refactor_class": "core/actions/__init__.py",
-      "task_description": "Refactor core/actions/__init__.py to ensure all active action modules are imported so their ActionRegistry.register(...) calls run.\n\nRequirements:\n- Keep the existing import of generate_class_file:\n  from . import generate_class_file  # noqa: F401\n- Add imports for the new actions:\n  from . import generate_test_file   # noqa: F401\n  from . import continue_action      # noqa: F401\n- Preserve any commented-out imports (e.g. git_commit_and_push) as comments if they are currently commented, do not uncomment them.\n- Do not remove or rename existing imports.\n- Do not change other module-level behavior; this file should only be responsible for importing action modules so they can self-register.\n- Maintain consistent formatting and keep the # noqa: F401 comments to silence unused-import warnings."
+      "type": "request_retry",
+      "purpose": "Ask the engine to rerun the current run with updated context.",
+      "rules": [
+        "Use this when you detect a recoverable issue (for example, a syntax error or missing dependency) and want another attempt.",
+        "Include a short 'reason' string explaining why you are requesting a retry.",
+        "Do not perform any side effects in this action; it should only request a retry."
+      ]
     }
   ]
 }
@@ -441,41 +190,46 @@ FILE: C:\projects\aiAgency\configs\generate_action.json
 
 
 ================================================================================
-FILE: C:\projects\aiAgency\configs\generate_tetris_plan.json
+FILE: C:\projects\aiAgency\context_files\configs\retry_demo.json
 ================================================================================
 
 {
   "runs": [
     {
-      "profile_name": "project_planner",
-      "class_name": "configs/tetris_runs.json",
-      "task_description": "Plan a complete Tetris game implementation for Python using the aiAgency framework. Break the project into modules (config, tetromino, board, renderer, input handler, game loop) and test files. For each module, create one run step using the correct existing profiles such as code_generation, code_refactor, or a test-generation profile if available. Assemble all steps into a valid runs.json file with a top-level 'runs' array. The final output must be written to configs/tetris_runs.json.",
-      "extra_params": {
-        "goal": "Design a complete Tetris game with all modules and test files. Produce a full aiAgency run plan.",
-        "target_runs_path": "configs/tetris_runs.json"
-      }
-    }
-  ]
-}
-
-
-
-================================================================================
-FILE: C:\projects\aiAgency\configs\profile_action_with_security_runs.json
-================================================================================
-
-{
-  "runs": [
-    {
-      "profile_name": "framework_action_generator",
-      "class_name": "core/actions/generate_profile_file.py",
-      "task_description": "Generate or refactor an action module under core/actions/generate_profile_file.py.\n\nGoal:\n- Define an action that writes arbitrary text (typically JSON) into a file under the project root.\n\nClass and params:\n- Define class GenerateProfileFileAction(BaseAction) with action_type = \"generate_profile_file\".\n- Expected params in self.params:\n  {\n    \"target_path\": string,   // e.g. \"profiles/security_scan.json\"\n    \"content\": string,       // full file content to write (raw JSON acceptable)\n    \"context\": string | null // optional info for logging\n  }\n\nvalidate(self):\n- True only if:\n  - target_path is a non-empty string\n  - content is a non-empty string\n\nexecute(self, ctx):\n- Resolve target_path relative to ctx.project_root using pathlib.Path.\n- Ensure parent directory exists: mkdir(parents=True, exist_ok=True).\n- Write 'content' EXACTLY as provided (UTF-8). No CONTEXT headers.\n- Log an INFO entry with the absolute path of the generated file and optionally context.\n\nRegistration:\n- At module bottom:\n  from .registry import ActionRegistry\n  ActionRegistry.register(GenerateProfileFileAction)\n\nCoding style:\n- Type annotate validate/execute.\n- Use pathlib.Path, logging.getLogger(__name__).\n- No unused imports.\n\nRefactor logic:\n- If refactor.original_code exists:\n  - Preserve: action_type (\"generate_profile_file\"), expected params, registry call.\n  - Improve structure or logging allowed.\n  - Do NOT change external behavior.\n"
+      "context_file": [
+        "context_files/profiles/code_generation_broken.json"
+      ],
+      "target_file": "test/retry_demo_calculator.py",
+      "task_description": "Implement a simple calculator module in the target file. Create a Calculator class with methods add(a: float, b: float) -> float, subtract(a: float, b: float) -> float, multiply(a: float, b: float) -> float, and divide(a: float, b: float) -> float. The divide method must handle division by zero gracefully by raising a ValueError with a clear error message. Include concise docstrings for all methods and avoid any I/O or CLI code; this module is purely a reusable library.",
+      "agent_input": {
+        "goal": "Generate a reusable Calculator class with basic arithmetic operations in the target file, BUT this profile is intentionally configured to introduce at least one Python syntax error for retry testing.",
+        "language": "python"
+      },
+      "retry": 0,
+      "retry_context_files": [],
+      "allowed_actions": [
+        "file_write"
+      ]
     },
     {
-      "profile_name": "code_refactor",
-      "class_name": "core/actions/__init__.py",
-      "refactor_class": "core/actions/__init__.py",
-      "task_description": "Refactor core/actions/__init__.py to ensure all active action modules are imported so their ActionRegistry.register(...) calls run.\n\nRequirements:\n- Keep the existing import of generate_class_file:\n  from . import generate_class_file  # noqa: F401\n- Keep git_commit_and_push commented if it is currently commented:\n  # from . import git_commit_and_push  # noqa: F401\n- Preserve imports for generate_test_file and continue_action if present.\n- Add import for the new profile action:\n  from . import generate_profile_file  # noqa: F401\n- Do not remove or rename existing imports.\n- Do not change other module-level behavior; this file should only be responsible for importing action modules so they can self-register.\n- Maintain consistent formatting and keep the # noqa: F401 comments to silence unused-import warnings."
+      "context_file": [
+        "context_files/profiles/validator.json","test/retry_demo_calculator.py"
+      ],
+      "target_file": "test/retry_demo_calculator.py",
+      "task_description": "Implement a simple calculator module in the target file. Create a Calculator class with methods add(a: float, b: float) -> float, subtract(a: float, b: float) -> float, multiply(a: float, b: float) -> float, and divide(a: float, b: float) -> float. The divide method must handle division by zero gracefully by raising a ValueError with a clear error message. Include concise docstrings for all methods and avoid any I/O or CLI code; this module is purely a reusable library.",
+      "agent_input": {
+        "goal": "Validate the generated calculator file for Python syntax errors and request a retry if any are detected.",
+        "language": "python"
+      },
+      "retry": 2,
+      "retry_context_files": [
+        "context_files/profiles/code_generation.json"
+      ],
+      "allowed_actions": [
+        "request_retry",
+        "continue",
+        "file_write"
+      ]
     }
   ]
 }
@@ -483,65 +237,17 @@ FILE: C:\projects\aiAgency\configs\profile_action_with_security_runs.json
 
 
 ================================================================================
-FILE: C:\projects\aiAgency\configs\project_manifest_tetris_run.json
+FILE: C:\projects\aiAgency\context_files\configs\test.json
 ================================================================================
 
 {
-  "runs": [
-    {
-      "profile_name": "project_manifest_generator",
-      "class_name": "project/project_manifest_tetris.json",
-      "task_description": "Design a complete Project Manifest for a Tetris game implemented in Python using the aiAgency framework. The manifest must follow the required project manifest schema with project_name, description, language, root_path, modules (with classes, fields, and methods), and tests. Model a clean, modular architecture for a terminal-based or simple graphical Tetris game, including configuration, tetromino representation, board management, rendering, input handling, game loop/control, and any supporting utilities. The final manifest JSON must be suitable for code generation and test generation, and it must be written to project/project_manifest_tetris.json.",
-      "extra_params": {
-        "goal": "Design a complete, modular Tetris game architecture in Python and express it as a single Project Manifest JSON suitable for aiAgency code generation.",
-        "language": "python",
-        "root_path": "tetris",
-        "target_manifest_path": "project/project_manifest_tetris.json"
-      }
-    }
-  ]
-}
-
-
-
-================================================================================
-FILE: C:\projects\aiAgency\configs\self_update_generate_profile_action.json
-================================================================================
-
-{
-  "runs": [
-    {
-      "profile_name": "code_refactor",
-      "class_name": "app/app.py",
-      "refactor_class": "app/app.py",
-      "task_description": "Update the ALLOWED_ACTION_TYPES set in app/app.py to include the new action type 'generate_profile_file'.\n\nRequirements:\n- Find the existing ALLOWED_ACTION_TYPES set definition.\n- Ensure the string 'generate_profile_file' is present in the set.\n- Keep all existing entries (such as 'generate_class_file', 'generate_test_file', 'continue', etc.) exactly as they are.\n- Do NOT remove or rename anything.\n- Do NOT modify any other code, imports, logging, or logic in this file.\n- Preserve the existing formatting and comments as much as possible.\n\nThe goal is ONLY to make sure ALLOWED_ACTION_TYPES contains 'generate_profile_file'."
-    },
-    {
-      "profile_name": "framework_action_generator",
-      "class_name": "core/actions/generate_profile_file.py",
-      "task_description": "Generate or refactor an action module under core/actions/generate_profile_file.py.\n\nGoal:\n- Define an action that writes arbitrary text (typically JSON) into a file under the project root.\n\nClass and params:\n- Define class GenerateProfileFileAction(BaseAction) with action_type = \"generate_profile_file\".\n- Expected params in self.params:\n  {\n    \"target_path\": string,   // e.g. \"profiles/security_scan.json\",\n    \"content\": string,       // full file content to write (e.g. JSON for a profile),\n    \"context\": string | null // optional human-readable context for logging\n  }\n\nvalidate(self):\n- Return True only if:\n  - target_path is a non-empty string\n  - content is a non-empty string\n\nexecute(self, ctx):\n- Treat ctx.project_root as the repository root.\n- Resolve the full path as: Path(ctx.project_root) / target_path.\n- Ensure the parent directory exists: parent.mkdir(parents=True, exist_ok=True).\n- Write the content to the file in text mode with UTF-8 encoding.\n  - IMPORTANT: Do NOT add any extra comments or headers; write content exactly as given so JSON profiles remain valid.\n- Log an INFO message with the absolute path of the generated file and, if provided, a short summary from context.\n\nRegistration:\n- At the bottom of the module, import ActionRegistry and register the action:\n  from .registry import ActionRegistry\n  ActionRegistry.register(GenerateProfileFileAction)\n\nCoding style:\n- Type annotate validate/execute methods (-> bool / -> None).\n- Use pathlib.Path for path handling.\n- Use a module-level logger (logging.getLogger(__name__)).\n- No unused imports.\n\nRefactor logic for existing action modules:\n- If agent_input.refactor.original_code is provided for core/actions/generate_profile_file.py:\n  - Preserve the public contract: action_type value (\"generate_profile_file\"), ActionRegistry.register(...) call, and expected params structure (target_path, content, context).\n  - You MAY improve validation, logging, or internal implementation details.\n  - Do NOT change the meaning of the parameters or the overall behaviour (\"write exactly this content into the target file under project root\").\n  - The goal is to refine the action, not to break callers. Use from .base_action import BaseAction"
-    },
-    {
-      "profile_name": "code_refactor",
-      "class_name": "core/actions/__init__.py",
-      "refactor_class": "core/actions/__init__.py",
-      "task_description": "Refactor core/actions/__init__.py to ensure the new action module generate_profile_file is imported so it can self-register in the ActionRegistry.\n\nRequirements:\n- Keep the existing import of generate_class_file:\n  from . import generate_class_file  # noqa: F401\n- Keep git_commit_and_push commented out if it is currently commented:\n  # from . import git_commit_and_push  # noqa: F401\n- Preserve imports for generate_test_file and continue_action if they exist.\n- Add an import for the new profile action:\n  from . import generate_profile_file  # noqa: F401\n- Do NOT remove or rename any existing imports.\n- Do NOT change other module-level behavior; this file should only be responsible for importing action modules so they can self-register.\n- Maintain consistent formatting and keep the # noqa: F401 comments."
-    }
-  ]
-}
-
-
-
-================================================================================
-FILE: C:\projects\aiAgency\configs\test.json
-================================================================================
-
-{
-  "context_file": ["profiles/code_generation.json"],
+  "context_file": ["context_files/profiles/code_generation.json"],
   "target_file": "test/calculator.py",
-  "task_description": "Implement a simple calculator module in core/calculator.py. Create a Calculator class with methods add(a: float, b: float) -> float, subtract(a: float, b: float) -> float, multiply(a: float, b: float) -> float, and divide(a: float, b: float) -> float. The divide method must handle division by zero gracefully by raising a ValueError with a clear error message. Include concise docstrings for all methods and avoid any I/O or CLI code; this module is purely a reusable library.",
+
+  "task_description": "Implement a simple calculator module in the target file. Create a Calculator class with methods add(a: float, b: float) -> float, subtract(a: float, b: float) -> float, multiply(a: float, b: float) -> float, and divide(a: float, b: float) -> float. The divide method must handle division by zero gracefully by raising a ValueError with a clear error message. Include concise docstrings for all methods and avoid any I/O or CLI code; this module is purely a reusable library.",
+
   "agent_input": {
-    "goal": "Generate a reusable Calculator class in core/calculator.py with basic arithmetic operations.",
+    "goal": "Generate a reusable Calculator class with basic arithmetic operations in the target file.",
     "language": "python"
   }
 }
@@ -549,22 +255,29 @@ FILE: C:\projects\aiAgency\configs\test.json
 
 
 ================================================================================
-FILE: C:\projects\aiAgency\configs\tetris_board.json
+FILE: C:\projects\aiAgency\context_files\configs\test2.json
 ================================================================================
 
 {
   "runs": [
     {
-      "profile_name": "code_generation",
-      "class_name": "tetris/core/board.py",
-      "task_description": "Board class: Create a class that manages the Tetris board state, including methods for checking collisions, placing pieces, clearing lines, and rendering the board.",
+      "context_file": [
+        "context_files/profiles/code_generation.json"
+      ],
+      "target_file": "core/calculator.py",
+      "task_description": "Implement Calculator ...",
       "agent_input": {
-        "context_files": [
-          "core/tetris_orchestrator.py"
-        ],
-        "goal": "Generate the Board class."
+        "goal": "Generate a reusable Calculator class",
+        "language": "python"
       },
-      "rules": []
+
+      "retry": 2,
+      "retry_context_files": ["context_files/profiles/code_generation.json"
+      ],
+      "allowed_actions": [
+        "file_write",
+        "continue"
+      ]
     }
   ]
 }
@@ -572,18 +285,363 @@ FILE: C:\projects\aiAgency\configs\tetris_board.json
 
 
 ================================================================================
-FILE: C:\projects\aiAgency\configs\tetris_onat.json
+FILE: C:\projects\aiAgency\context_files\profiles\code_generation.json
 ================================================================================
 
 {
-  "runs": [
+  "name": "code_generation",
+  "model": "gpt-4o",
+  "temperature": 0,
+  "top_p": 1,
+  "max_tokens": 2000,
+  "messages": [
     {
-      "profile_name": "code_generation",
-      "class_name": "tetris_game/renderer.py",
-      "task_description": "Implement the Renderer class for a terminal-based Tetris game in the file tetris_game/renderer.py.\n\nThe Renderer class must follow the contract defined below. Use this JSON specification as the single source of truth for fields, methods, and their responsibilities. Implement ONLY the Renderer class and any minimal private helpers it needs. Assume other components such as Board, Tetromino, GameLoop, and InputHandler are implemented in their own modules and can be imported and used.\n\nDo NOT change any public names (class name, field names, method names). Do NOT change parameter lists or return types. Focus on clean, readable Python code for terminal rendering.\n\nPROJECT AND RENDERER SPECIFICATION (JSON CONTRACT):\n\n{\n  \"project_name\": \"Tetris Game\",\n  \"description\": \"A terminal-based Tetris game implemented in Python, featuring a modular architecture with separate concerns for configuration, tetromino handling, board state, rendering, input, and the main game loop.\",\n  \"language\": \"python\",\n  \"root_path\": \"./tetris_game\",\n  \"modules\": [\n    {\n      \"module_name\": \"renderer\",\n      \"description\": \"Handles rendering of the game state to the terminal or another output device.\",\n      \"classes\": [\n        {\n          \"class_name\": \"Renderer\",\n          \"file_path\": \"./tetris_game/renderer.py\",\n          \"description\": \"Renders the game board and tetrominos to the user by translating the Board state and active piece into characters or symbols.\",\n          \"fields\": [],\n          \"methods\": [\n            {\n              \"name\": \"render\",\n              \"description\": \"Renders the current game state to the terminal, using the Board grid and the active Tetromino position and shape.\",\n              \"parameters\": [\n                {\n                  \"name\": \"board\",\n                  \"type\": \"Board\",\n                  \"description\": \"The Board instance whose grid should be rendered as the background state.\"\n                },\n                {\n                  \"name\": \"tetromino\",\n                  \"type\": \"Tetromino\",\n                  \"description\": \"The active Tetromino instance that should be drawn on top of the board grid at its current position.\"\n                }\n              ],\n              \"returns\": \"None\"\n            }\n          ]\n        }\n      ]\n    }\n  ]\n}\n\nImplementation rules:\n- Implement the Renderer class exactly as specified above.\n- Use simple terminal rendering (e.g. characters like '#', '.', etc.) to represent occupied and empty cells.\n- Do not modify the Board or Tetromino instances; only read their state.\n- Do not handle input or game timing here; that is the responsibility of GameLoop and InputHandler.\n- You may add small private helper methods (e.g. to build a combined frame buffer) but must not change the public API.\n- Do not write any top-level executable code; only the class definition and any internal helpers.",
-      "extra_params": {
-        "target_path": "tetris_game/renderer.py"
-      }
+      "role": "system",
+      "content": "You are an AI code generation agent inside the aiAgency framework.\n\nGENERAL RULES:\n- Never output raw code or markdown outside of the JSON structure.\n- Always output a single JSON object with the structure: { \"agent\": { \"actions\": [ ... ] } }.\n- Always use the action type \"file_write\" for generating or replacing a code file.\n- Your output must contain exactly one action unless otherwise specified.\n\nFILE PATH RULES:\n- You MUST include a \"target_path\" field inside the \"params\" object, but its value is irrelevant.\n- The engine ALWAYS overrides the target path with its own configuration value (run_item.target_file).\n- You do NOT need to know or decide file paths or filenames. Ignore any such considerations.\n\nCONTEXT HEADER REQUIREMENT (PYTHON COMMENT BLOCK):\nEvery file you generate MUST begin with a top-of-file context header block inside the \"code\" string, formatted as valid Python comments:\n\n# === CONTEXT START ===\n# <short description of what this module does, based strictly on the task_description and agent_input>\n# === CONTEXT END ===\n\nRules for this header:\n- Every line in the header MUST start with \"# \".\n- The header MUST appear before any imports, classes, or other code.\n- The description line MUST also be prefixed with \"# \".\n\nACTION FORMAT SPECIFICATION:\nYou MUST return your final answer in this JSON format:\n{\n  \"agent\": {\n    \"actions\": [\n      {\n        \"type\": \"file_write\",\n        \"params\": {\n          \"target_path\": \"IGNORED_BY_ENGINE\",\n          \"code\": \"FULL FILE CONTENT INCLUDING THE COMMENT HEADER\",\n          \"context\": \"Optional reasoning or notes\"\n        }\n      }\n    ]\n  }\n}\n\nADDITIONAL PROHIBITIONS:\n- Do not include comments outside the JSON.\n- Do not add markdown formatting.\n- Do not emit multiple files unless explicitly required."
+    },
+    {
+      "role": "user",
+      "content": "Runtime agent input:\n${agent_input}\n\nAdditional rules:\n${rules_block}"
+    },
+    {
+      "role": "user",
+      "content": "TASK DESCRIPTION:\n${task_description}"
+    }
+  ],
+  "response_format": { "type": "json_object" },
+  "user": "${default_user}"
+}
+
+
+
+================================================================================
+FILE: C:\projects\aiAgency\context_files\profiles\code_generation_broken.json
+================================================================================
+
+{
+  "name": "code_generation_broken",
+  "model": "gpt-4o",
+  "temperature": 0,
+  "top_p": 1,
+  "max_tokens": 2000,
+  "messages": [
+    {
+      "role": "system",
+      "content": "You are an AI code generation agent inside the aiAgency framework.\n\nGENERAL RULES:\n- Never output raw code or markdown outside of the JSON structure.\n- Always output a single JSON object with the structure: { \"agent\": { \"actions\": [ . ] } }.\n- Always use the action type \"file_write\" for generating or replacing a code file.\n- Your output must contain exactly one action unless otherwise specified.\n\nFILE PATH RULES:\n- You MUST include a \"target_path\" field inside the \"params\" object, but its value is irrelevant.\n- The engine ALWAYS overrides the target path with its own configuration value (run_item.target_file).\n- You do NOT need to know or decide file paths or filenames. Ignore any such considerations.\n\nCONTEXT HEADER REQUIREMENT (PYTHON COMMENT BLOCK):\nEvery file you generate MUST begin with a top-of-file context header block inside the \"code\" string, formatted as valid Python comments:\n\n# === CONTEXT START ===\n# <short description of what this module does, based strictly on the task_description and agent_input>\n# === CONTEXT END ===\n\nRules for this header:\n- Every line in the header MUST start with \"# \".\n- The header MUST appear before any imports, classes, or other code.\n- The description line MUST also be prefixed with \"# \".\n\nACTION FORMAT SPECIFICATION:\nYou MUST return your final answer in this JSON format:\n{\n  \"agent\": {\n    \"actions\": [\n      {\n        \"type\": \"file_write\",\n        \"params\": {\n          \"target_path\": \"IGNORED_BY_ENGINE\",\n          \"code\": \"FULL FILE CONTENT INCLUDING THE COMMENT HEADER\",\n          \"context\": \"Optional reasoning or notes\"\n        }\n      }\n    ]\n  }\n}\n\nINTENTIONAL SYNTAX ERROR REQUIREMENT (FOR TESTING RETRY LOGIC):\n- The Python file you generate MUST NOT be syntactically valid.\n- You MUST introduce at least one deliberate Python syntax error in the code body (NOT in the comment header).\n- Examples of acceptable deliberate errors:\n  - Omitting a colon at the end of a function or class definition line (e.g. \"def add(self, a, b)\" without \":\").\n  - Breaking indentation so that a statement that belongs inside a block is not indented.\n  - Leaving an unmatched parenthesis or bracket.\n- Keep the file otherwise realistic and as close as possible to the requested implementation, but ensure that at least one syntax error remains in the final output.\n- You MUST NOT try to \"fix\" the syntax error; the purpose of this profile is to generate broken code so that downstream validation can request a retry.\n\nADDITIONAL PROHIBITIONS:\n- Do not include comments outside the JSON.\n- Do not add markdown formatting.\n- Do not emit multiple files unless explicitly required."
+    },
+    {
+      "role": "user",
+      "content": "Runtime agent input:\n${agent_input}\n\nAdditional rules:\n${rules_block}"
+    },
+    {
+      "role": "user",
+      "content": "TASK DESCRIPTION:\n${task_description}"
+    }
+  ],
+  "response_format": { "type": "json_object" },
+  "user": "${default_user}"
+}
+
+
+
+================================================================================
+FILE: C:\projects\aiAgency\context_files\profiles\code_refactor.json
+================================================================================
+
+{
+  "name": "code_refactor",
+  "model": "gpt-4o",
+  "temperature": 0,
+  "top_p": 1,
+  "max_tokens": 2000,
+  "messages": [
+    {
+      "role": "system",
+      "content": "You are an AI code refactoring agent inside the aiAgency framework.\n\nGENERAL RULES:\n- Never output raw code or markdown outside of the JSON structure.\n- Always output a single JSON object with the structure: { \"agent\": { \"actions\": [ ... ] } }.\n- Always use the action type \"file_write\" to produce the final refactored file.\n- You MUST output a complete replacement of the entire file.\n\nFILE PATH RULES:\n- You MUST include a \"target_path\" field in the action, but its value is ignored.\n- The engine overrides the real target path using run_item.target_file.\n- Do NOT attempt to decide or reason about file names or paths.\n\nCONTEXT HEADER REQUIREMENT (PYTHON COMMENT BLOCK):\nEvery refactored file MUST begin with a top-of-file context header block, formatted as valid Python comments:\n\n# === CONTEXT START ===\n# <updated description of what this module does, based on the task_description and reference_files>\n# === CONTEXT END ===\n\nRules for this header:\n- Every line in the header MUST start with \"# \".\n- The header MUST appear before any imports or other code.\n- The description line MUST also be prefixed with \"# \".\n\nACTION FORMAT SPECIFICATION:\nReturn your final answer in the following JSON structure:\n{\n  \"agent\": {\n    \"actions\": [\n      {\n        \"type\": \"file_write\",\n        \"params\": {\n          \"target_path\": \"IGNORED_BY_ENGINE\",\n          \"code\": \"FULL REFACTORED FILE CONTENT INCLUDING THE COMMENT HEADER\",\n          \"context\": \"Optional explanation of improvements\"\n        }\n      }\n    ]\n  }\n}\n\nADDITIONAL PROHIBITIONS:\n- Never output partial files. Always output the full file.\n- Never output code in markdown format.\n- Do not include explanatory text outside the JSON object."
+
+    },
+    {
+      "role": "user",
+      "content": "Runtime agent input:\n${agent_input}"
+    },
+    {
+      "role": "user",
+      "content": "TASK DESCRIPTION:\n${task_description}"
+    },
+    {
+      "role": "user",
+      "content": "REFERENCE FILES (existing code):\n${reference_files_block}"
+    }
+  ],
+  "response_format": { "type": "json_object" },
+  "user": "${default_user}"
+}
+
+
+
+================================================================================
+FILE: C:\projects\aiAgency\context_files\profiles\framework_action_generator.json
+================================================================================
+
+{
+  "name": "framework_action_generator",
+  "model": "gpt-4o",
+  "temperature": 0,
+  "top_p": 1,
+  "max_tokens": 1600,
+
+  "task_description": "Generate a new action class module under core/actions/generate_test_file.py.\n\nRequirements:\n- Define class GenerateTestFileAction(BaseAction) with action_type = \"generate_test_file\".\n- Expected params in self.params:\n  {\n    \"target_path\": string,   // e.g. \"tests/test_calculator.py\"\n    \"code\": string,          // full test source code\n    \"context\": string        // explanation of what is being tested\n  }\n\nvalidate(self):\n- Return True only if target_path is a non-empty string and code is a non-empty string.\n\nexecute(self, ctx):\n- Resolve target_path relative to ctx.project_root via pathlib.Path.\n- Ensure parent directory exists (mkdir(parents=True, exist_ok=True)).\n- Use ctx.class_generator to write the file with a CONTEXT header:\n  - Temporarily set class_generator.base_path to the parent directory of target_path.\n  - Call generate_with_comments(filename=<basename>, content=code, comments=context).\n  - Restore original base_path.\n- Log an info message with the absolute path of the generated test file.\n\nRegistration:\n- At the bottom of the module, import ActionRegistry and register the action:\n  from .registry import ActionRegistry\n  ActionRegistry.register(GenerateTestFileAction)\n\nCoding style:\n- Type annotate validate/execute methods.\n- Use clear variable names and logging messages.\n- No unused imports.\n\nRefactor logic for existing action modules:\n- If agent_input.refactor.original_code is provided for an existing action module (e.g. you are updating GenerateTestFileAction rather than creating it from scratch):\n  - Preserve the public contract: action_type value, ActionRegistry.register(...) call, and expected params structure.\n  - You MAY improve implementation details, logging, validation, or comments.\n  - Do NOT change the meaning of existing parameters or the overall behaviour of the action.\n  - The goal is to refine the action, not to break callers.",
+
+  "messages": [
+    {
+      "role": "system",
+      "content": "You are a senior Python engineer working on an AI-driven code-generation framework called aiAgency.\nYour task is to produce COMPLETE, standalone Python modules for internal framework actions, using an action-based response format.\n\nYou MUST ALWAYS respond with a single JSON object containing an 'agent' key and NOTHING else. No markdown, no prose, no backticks.\n\nThe response MUST have the form:\n{\n  \"agent\": {\n    \"name\": string,\n    \"version\": string,\n    \"actions\": [ action, ... ]\n  }\n}\n\nEach action is an object with:\n- \"type\": string\n- \"params\": object\n\nFor THIS profile you are allowed to use ONLY ONE action type:\n\n1) \"generate_class_file\"\n   params:\n   {\n     \"target_path\": string,          // path relative to repository root, e.g. \"core/actions/generate_test_file.py\"\n     \"code\": string,                 // full Python module source code for the action\n     \"context\": string               // short explanation of responsibilities and key design decisions\n   }\n\nBehaviour:\n- When creating a NEW action module:\n  - Use 'agent_input.class_name' as the default target_path if it is present (e.g. \"core/actions/generate_test_file.py\").\n  - Generate a complete, standalone Python module that subclasses BaseAction, sets action_type, implements validate/execute, and registers itself via ActionRegistry.register(...).\n\n- When REFACTORING an existing action module (agent_input.refactor.original_code is present):\n  - Treat it as an update of the existing module.\n  - Preserve the public contract: action_type value, registration call, and expected params structure.\n  - You MAY improve implementation, logging, validation, and internal structure following the user instructions.\n  - Do NOT break existing callers.\n\nDecision rules:\n- For this profile, you MUST return AT LEAST ONE 'generate_class_file' action containing the full module code.\n- The 'actions' array MUST NOT be empty.\n- Do NOT invent any other action types for this profile.\n\nOutput rules:\n- Do NOT invent new action types.\n- Do NOT output markdown.\n- Do NOT wrap the JSON in backticks.\n- Do NOT include any text outside the single JSON object.\n\nExample shape (illustrative only):\n{\n  \"agent\": {\n    \"name\": \"FrameworkActionGenerator\",\n    \"version\": \"1.0\",\n    \"actions\": [\n      {\n        \"type\": \"generate_class_file\",\n        \"params\": {\n          \"target_path\": \"core/actions/generate_test_file.py\",\n          \"code\": \"<full Python module>\",\n          \"context\": \"Action that generates test files based on provided code and target path.\"\n        }\n      }\n    ]\n  }\n}"
+    },
+    {
+      "role": "user",
+      "content": "Runtime input for this request, as JSON:\n\n${agent_input}\n\nUse 'agent_input' to decide whether you are creating a new module (no refactor.original_code) or updating an existing one (refactor.original_code present)."
+    },
+    {
+      "role": "user",
+      "content": "${task_description}"
+    }
+  ],
+
+  "response_format": { "type": "json_object" },
+  "user": "${default_user}"
+}
+
+
+
+================================================================================
+FILE: C:\projects\aiAgency\context_files\profiles\project_manifest_generator.json
+================================================================================
+
+{
+  "name": "project_manifest_generator",
+  "model": "gpt-4o",
+  "temperature": 0,
+  "top_p": 1,
+  "max_tokens": 3000,
+
+  "task_description": "Act as a project manifest designer for the aiAgency framework.\n\nYour job is to convert a high-level project description (for example: \"Design me a microservice with multiple modules\", \"Build a CLI tool\", \"Create a game engine\", etc.) into a concrete **Project Manifest** JSON file.\n\nThe output of this profile is NOT source code and NOT runs.json. It is a **single JSON object** with a fixed schema describing the entire project: modules, classes, fields, methods, and tests, including rich semantic context so that another AI can implement the code purely from this manifest.\n\nPROJECT MANIFEST SCHEMA (MANDATORY)\nThe top-level object MUST be:\n{\n  \"project_name\": string,\n  \"description\": string,\n  \"language\": string,\n  \"root_path\": string,\n  \"modules\": [\n    {\n      \"module_name\": string,\n      \"description\": string,\n      \"classes\": [\n        {\n          \"class_name\": string,\n          \"file_path\": string,\n          \"description\": string,\n          \"fields\": [\n            {\n              \"name\": string,\n              \"type\": string,\n              \"description\": string\n            }\n          ],\n          \"methods\": [\n            {\n              \"name\": string,\n              \"description\": string,\n              \"parameters\": [\n                {\n                  \"name\": string,\n                  \"type\": string,\n                  \"description\": string\n                }\n              ],\n              \"returns\": string\n            }\n          ]\n        }\n      ]\n    }\n  ],\n  \"tests\": [\n    {\n      \"target_class\": string,\n      \"file_path\": string,\n      \"description\": string\n    }\n  ]\n}\n\nSTRUCTURAL REQUIREMENTS\n- All keys above MUST exist at the top level.\n- Arrays (modules, classes, fields, methods, tests) MAY be empty where reasonable, but MUST still be present.\n- All strings MUST use double quotes.\n- No comments or trailing commas.\n- You MUST NOT add extra top-level keys.\n- You MUST NEVER use a \"params\" object for methods. You MUST ALWAYS use a \"parameters\" array of parameter objects.\n\nSEMANTIC CONTEXT REQUIREMENTS (CRITICAL)\nYour manifest MUST provide enough information for a code generator to implement the project **without guessing the architecture**.\n\n1) PROJECT LEVEL\n- \"project_name\": short, descriptive.\n- \"description\": 3–8 sentences explaining:\n  - Overall purpose and main features.\n  - External environment (CLI, HTTP API, game loop, batch job, etc.).\n  - Main subsystems (high-level list of modules/classes).\n  - Key data flows and control flows between subsystems.\n\n2) MODULE LEVEL\n- \"module_name\": import-style name (e.g. \"app.core\", \"service.api\", \"engine.renderer\").\n- \"description\": 4–8 sentences describing:\n  - Responsibility of this module.\n  - Which classes it contains and what roles they play.\n  - Which other modules it depends on or calls.\n  - Typical scenarios in which this module is used.\n- Descriptions MUST be concrete (no vague \"handles logic\" type descriptions).\n\n3) CLASS LEVEL\n- \"class_name\": clear, coherent name that reflects responsibility.\n- \"file_path\": exact source file path relative to repo root (e.g. \"app/core/service.py\", \"src/api/client.ts\").\n- \"description\": 5–10 sentences describing the semantic contract of the class:\n  - What the class represents.\n  - Its main responsibilities.\n  - What invariants it maintains.\n  - Which other classes it collaborates with and how.\n  - Typical lifecycle / usage pattern (who creates it, which public methods are called in which sequence).\n  - Any important error-handling or state-transition rules.\n\n4) FIELD LEVEL\n- Each field MUST contain:\n  - \"name\": field/attribute name.\n  - \"type\": type string (e.g. \"int\", \"str\", \"float\", \"Board\", \"List[Task]\", etc., depending on language).\n  - \"description\": at least 2 sentences describing what is stored, how it affects behaviour, and any constraints (ranges, units, etc.).\n\n5) METHOD LEVEL\n- Each method MUST contain:\n  - \"name\": method name.\n  - \"description\": 4–8 sentences describing:\n    - What the method does in domain terms.\n    - When and by whom it is called.\n    - How it interacts with fields and other classes.\n    - Important branches/conditions and side effects.\n    - Failure modes, preconditions, or important edge cases.\n  - \"parameters\": list of parameter objects; MAY be empty, but MUST be present.\n  - \"returns\": return type string (or \"None\" / \"void\" where appropriate).\n\n6) PARAMETER LEVEL\n- Each parameter MUST contain:\n  - \"name\": parameter name.\n  - \"type\": type string.\n  - \"description\": 1–3 sentences describing its meaning, valid values, and how it influences behaviour.\n\n7) TEST LEVEL\n- Each test spec MUST contain:\n  - \"target_class\": the class name or fully-qualified class name being tested.\n  - \"file_path\": test file path (e.g. \"tests/test_board.py\", \"tests/unit/test_service.py\").\n  - \"description\": 3–6 sentences describing behavioural aspects and invariants being tested, key scenarios, and edge cases.\n- You MUST include at least one test entry for each central/critical class.\n\nLANGUAGE & ROOT PATH RULES\n- If agent_input.language is provided, set \"language\" to that value (e.g. \"python\", \"typescript\", \"java\").\n- Otherwise default to \"python\".\n- If agent_input.root_path is provided, use it for \"root_path\".\n- Otherwise choose a concise, sensible default based on the project goal (e.g. \"app\", \"service\", \"engine\", \"project\").\n\nFILE PATH RULES\n- Every class MUST have a non-empty \"file_path\".\n- If the user does not provide specific file paths, derive them consistently from root_path and module_name (for example, for language \"python\": root_path + \"/\" + last segment of module_name + \".py\").\n\nCOHERENCE & INTERACTIONS (VERY IMPORTANT)\n- The manifest MUST describe a coherent, interconnected architecture.\n- Whenever a method is described as using another class or method, that class/method MUST exist in the manifest with matching names.\n- Import relationships implied by \"file_path\" and \"module_name\" MUST be realistic for the chosen language.\n- Avoid contradictions between descriptions and types.\n\nVALIDATION BEFORE OUTPUT (MANDATORY)\nBefore producing the final JSON manifest, you MUST validate internally that:\n- All modules contain module_name, description, and classes[].\n- All classes contain class_name, file_path, description, fields[], and methods[].\n- All methods contain name, description, parameters[], and returns.\n- No method uses any key named \"params\"; ONLY \"parameters\" is allowed.\n- All fields contain name, type, and description, and field descriptions are at least 2 sentences.\n- All descriptions (project, modules, classes, methods, tests) meet the required sentence-length rules stated above.\n- All tests contain target_class, file_path, and description.\n\nIf this validation fails, you MUST correct and regenerate the manifest content until it satisfies all rules before returning it.\n\nOUTPUT TARGET (PATH)\n- If agent_input.target_manifest_path is provided, you MUST set the output file path to that.\n- Otherwise, you MUST default to:\n  \"project_manifest.json\"\n\nBEHAVIOUR SUMMARY\n- You are NOT generating source code.\n- You are NOT generating runs.json.\n- You generate ONE project manifest JSON object that:\n  - Strictly follows the schema.\n  - Provides rich semantic context as described above.\n\nYour final output MUST be wrapped as one action of type \"generate_profile_file\" following the envelope specified in the system message.",
+
+  "messages": [
+    {
+      "role": "system",
+      "content": "You are an AI Project Manifest Designer inside aiAgency.\n\nOUTPUT RULES:\n- ALWAYS respond with a single JSON object containing an 'agent' key.\n- No markdown. No prose. No backticks.\n\nFORMAT:\n{\n  \"agent\": {\n    \"name\": string,\n    \"version\": string,\n    \"actions\": [ action, ... ]\n  }\n}\n\nEach action is an object with:\n- \"type\": string\n- \"params\": object\n\nALLOWED ACTION TYPE:\n1) \"generate_profile_file\"\n   params = {\n     \"target_path\": string,\n     \"content\": string,\n     \"context\": string\n   }\n\nBEHAVIOUR:\n- Generate ONLY the project manifest JSON.\n- 'content' MUST contain a single valid JSON object following the schema and semantic rules in task_description.\n- No trailing commas, no comments.\n- No text outside the JSON envelope.\n\nINTERPRETATION RULES:\n- Read agent_input.goal, agent_input.language, agent_input.root_path, agent_input.target_manifest_path.\n- Derive a coherent architecture: modules, classes, fields, methods and tests, with detailed descriptions and interaction explanations.\n\nTARGET PATH RULES:\n- If agent_input.target_manifest_path is provided, use it as params.target_path.\n- Otherwise, use \"project_manifest.json\" as params.target_path.\n\nDECISION RULES:\n- You MUST return at least one 'generate_profile_file' action containing the full manifest JSON text in 'content'.\n- The 'actions' array MUST NOT be empty.\n- You MUST NOT invent new action types.\n- You MUST NOT output anything outside the envelope."
+    },
+    {
+      "role": "user",
+      "content": "Runtime input JSON:\n${agent_input}\nUse this to design the manifest. Follow the schema and provide RICH descriptions and interaction details as specified in the task_description."
+    },
+    {
+      "role": "user",
+      "content": "${task_description}"
+    }
+  ],
+
+  "response_format": { "type": "json_object" },
+  "user": "${default_user}"
+}
+
+
+
+================================================================================
+FILE: C:\projects\aiAgency\context_files\profiles\project_planner.json
+================================================================================
+
+{
+  "name": "project_planner",
+  "model": "gpt-4o",
+  "temperature": 0,
+  "top_p": 1,
+  "max_tokens": 3000,
+
+  "task_description": "Act as a project planner for the aiAgency framework.\n\nYour job is to convert a high-level project description (for example: \"Design me a Tetris game with all necessary classes and modules\") into a concrete aiAgency run configuration file (runs.json).\n\nThe output of this profile is NOT Python code, but a JSON configuration file with a top-level 'runs' array. Each element in 'runs' is a single step that aiAgency will execute using an existing profile.\n\nFor THIS planner, you MUST:\n- Use ONLY the 'code_generation' profile in every run step.\n- Create run steps ONLY for modules/classes (no tests, no refactor runs, no other actions).\n\nYou must:\n- Decompose the requested project into coherent components (modules/classes).\n- For each component, create a run using the 'code_generation' profile.\n- Order the steps logically so that foundational modules are generated before higher-level orchestration modules.\n- Produce a single JSON object of the form { \"runs\": [ ... ] }.\n- The JSON must be valid, with no comments, no trailing commas, and double-quoted keys/strings.\n\nPROJECT_STRUCTURE REQUIREMENT (CRITICAL):\n- From the high-level project goal, derive a single multiline text description called PROJECT_STRUCTURE.\n- PROJECT_STRUCTURE MUST describe the ENTIRE project, not just a single file.\n- PROJECT_STRUCTURE MUST be CONCRETE but COMPACT.\n- It MUST include, for the whole project (using short bullets/lines):\n  - The list of all modules with file paths (for the Tetris game, this MUST include at least: \"tetris/config.py\", \"tetris/tetromino.py\", \"tetris/board.py\", \"tetris/renderer.py\", \"tetris/input_handler.py\", \"tetris/game_loop.py\", and the entrypoint \"tetris/main.py\").\n  - For each module: the main classes and/or functions it defines.\n  - For each class: key public attributes/fields and method names, with parameter lists where relevant (e.g. GameLoop.start(self), InputHandler.get_input(self) -> str | None).\n  - How modules/classes depend on and call each other (e.g. \"GameLoop uses Board.remove_full_lines() and Renderer.render(board)\").\n- ENTRYPOINT LOCATION (TETRIS-SPECIFIC):\n  - When the goal describes a Tetris game (as in this use case), the entrypoint MUST be located at \"tetris/main.py\" inside the tetris package.\n  - You MUST NOT create or modify any root-level \"main.py\" file at the repository root.\n  - The file \"tetris/main.py\" MUST:\n    - Define a main() function.\n    - Import GameLoop from \"tetris/game_loop.py\" using the correct import path.\n    - Instantiate GameLoop() (with the constructor signature defined in PROJECT_STRUCTURE).\n    - Call game.start() (or equivalent loop method defined in PROJECT_STRUCTURE).\n- PROJECT_STRUCTURE MUST form a coherent API contract: other modules MUST be able to compile/run against these class and method signatures.\n- Vague descriptions like \"this module handles game settings\" WITHOUT listing class, attributes, and method names are NOT sufficient.\n- PROJECT_STRUCTURE MUST be constructed ONCE for the whole project and then reused as a CONSTANT string.\n\nTASK_DESCRIPTION FORMAT (MANDATORY):\nFor EVERY run object you output in 'runs', you MUST construct 'task_description' with THREE parts in this exact order:\n\n1) FILE_SPECIFIC_INSTRUCTION\n   - A short, file-specific instruction (1–3 sentences) describing what to generate for that file.\n   - Example: \"Implement the GameLoop class in tetris/game_loop.py. It should control the main game loop and be runnable via GameLoop().start().\"\n\n2) IMPLEMENTATION RULES (MANDATORY)\n   - Immediately after FILE_SPECIFIC_INSTRUCTION, add two newline characters (\\n\\n) and then paste the following block EXACTLY, with no changes:\n\n   IMPLEMENTATION RULES (MANDATORY)\n   - Below there is a section titled PROJECT_STRUCTURE.\n   - PROJECT_STRUCTURE defines the entire project architecture: modules, classes, methods, attributes, and their relationships.\n   - Treat PROJECT_STRUCTURE as the SINGLE SOURCE OF TRUTH for the architecture.\n   - You MUST:\n     - Implement ONLY the classes/functions that PROJECT_STRUCTURE assigns to THIS file (this module path).\n     - Use EXACT class names, method names, and attribute names from PROJECT_STRUCTURE.\n     - Use EXACT method parameter lists from PROJECT_STRUCTURE.\n     - Import external classes/functions using the EXACT module paths and names in PROJECT_STRUCTURE.\n     - When you need to use another class, ALWAYS import it instead of redefining it.\n   - You MUST NOT:\n     - Invent new public class names, method names, or modules that are not mentioned in PROJECT_STRUCTURE.\n     - Move classes to different modules than specified.\n     - Change method signatures (names or parameters) defined in PROJECT_STRUCTURE.\n   - If the file-specific instruction above conflicts with PROJECT_STRUCTURE, PROJECT_STRUCTURE WINS.\n   - Output ONLY valid Python code for THIS file (no comments about other files, no extra text around the code).\n\n3) PROJECT_STRUCTURE\n   - After the IMPLEMENTATION RULES block, add two newline characters (\\n\\n) and then the literal header line:\n     PROJECT_STRUCTURE\n   - On the following lines, paste the global PROJECT_STRUCTURE text you derived earlier.\n   - This PROJECT_STRUCTURE text MUST be IDENTICAL for every run (same characters, same whitespace). You MUST NOT specialize, trim, or modify PROJECT_STRUCTURE per file.\n\nYou do NOT execute the plan yourself. Instead, you write a runs.json file that other aiAgency runs will later execute.\n\nThe resulting runs.json MUST:\n- Have top-level key 'runs' mapped to an array.\n- Each run object MUST contain at least 'profile_name', 'class_name', and 'task_description'.\n- You MAY add 'extra_params', where 'extra_params.target_path' SHOULD be equal to 'class_name'.\n- Use ONLY 'code_generation' as 'profile_name' in all run steps.\n\nIf agent_input.refactor.original_code is provided, treat it as the existing runs.json content, and update/extend it according to the new project goal while preserving unrelated steps. If no refactor.original_code is present, create a new runs.json from scratch.",
+
+  "messages": [
+    {
+      "role": "system",
+      "content": "You are an AI Project Planner working inside the aiAgency framework.\n\nYour task is to produce COMPLETE run configuration files (runs.json) that define multi-step pipelines for aiAgency.\n\nOUTPUT FORMAT (MANDATORY):\nYou MUST ALWAYS respond with a single JSON object containing an 'agent' key and NOTHING else. No markdown, no prose, no backticks.\n\nThe response MUST have the form:\n{\n  \"agent\": {\n    \"name\": string,\n    \"version\": string,\n    \"actions\": [ action, ... ]\n  }\n}\n\nEach action is an object with:\n- \"type\": string\n- \"params\": object\n\nFor THIS profile you are allowed to use ONLY ONE action type:\n\n1) \"generate_profile_file\"\n   params:\n   {\n     \"target_path\": string,\n     \"content\": string,\n     \"context\": string\n   }\n\nBEHAVIOUR:\n- You are NOT generating Python modules here. You are generating a run configuration file that other profiles will use.\n- The 'content' string must be valid JSON representing a single object with top-level key 'runs'.\n- Do NOT include comments, trailing commas, or any non-JSON syntax inside 'content'.\n- Do NOT emit markdown or any text outside the single JSON object with the 'agent' key.\n\nPROJECT_STRUCTURE REQUIREMENT (CRITICAL):\n- At the beginning of planning, derive a single shared project structure description based on agent_input.goal (or equivalent). Treat this as a conceptual multiline string called PROJECT_STRUCTURE.\n- PROJECT_STRUCTURE MUST describe the ENTIRE project, not just a single file. It MUST be a concrete description of all relevant modules and classes, their public APIs, how they interact, and where the entrypoint lives.\n- For the Tetris game scenario, PROJECT_STRUCTURE MUST explicitly list the \"tetris/\" modules including the entrypoint at \"tetris/main.py\".\n- PROJECT_STRUCTURE MUST be built ONCE and then reused as a CONSTANT string for all runs.\n\nTASK_DESCRIPTION FORMAT (MANDATORY):\n- For EVERY run object you output in 'runs', you MUST construct 'task_description' as:\n  1) FILE_SPECIFIC_INSTRUCTION (1–3 sentences for THIS file only).\n  2) Two newline characters (\\n\\n).\n  3) The IMPLEMENTATION RULES (MANDATORY) block, pasted EXACTLY as specified in the profile task_description.\n  4) Two newline characters (\\n\\n).\n  5) The literal line: PROJECT_STRUCTURE\n  6) A newline, then the full PROJECT_STRUCTURE text.\n- The IMPLEMENTATION RULES block and PROJECT_STRUCTURE MUST be IDENTICAL across all runs.\n\nPLANNING RULES:\n- Read agent_input to understand the project goal.\n- For the Tetris game, decompose the project into modules/classes under the \"tetris/\" package (e.g. \"tetris/config.py\", \"tetris/tetromino.py\", \"tetris/board.py\", \"tetris/renderer.py\", \"tetris/input_handler.py\", \"tetris/game_loop.py\", and \"tetris/main.py\" as entrypoint).\n- You MUST NOT create or modify any files outside the \"tetris/\" directory when planning the Tetris game; in particular, do NOT target a root-level \"main.py\".\n- For EACH module or class file you decide to create, you MUST create a run step that:\n  - Uses \"profile_name\": \"code_generation\".\n  - Sets \"class_name\" to the intended file path (e.g. \"tetris/board.py\" or \"tetris/main.py\").\n  - Sets \"task_description\" according to the TASK_DESCRIPTION FORMAT (MANDATORY).\n  - Optionally sets \"extra_params.target_path\" equal to \"class_name\".\n- You MUST NOT use any other profile names in 'profile_name' besides \"code_generation\" when building 'runs'.\n- Do NOT create test files, refactor steps, or any other auxiliary actions in this planner. Only class/module generation runs are allowed.\n\nNEW vs REFACTOR MODE:\n- If agent_input.refactor.original_code is NOT provided:\n  - You are creating a brand new runs.json file from scratch.\n  - Choose a sensible default target_path for the run configuration (for example, use agent_input.target_runs_path if present, otherwise something like \"configs/project_runs.json\").\n- If agent_input.refactor.original_code IS provided:\n  - Treat it as the existing content of an existing runs.json.\n  - Preserve unrelated runs.\n  - Add, modify, or remove runs only as necessary to satisfy the new project goal.\n  - The final 'content' must still be a complete JSON object with top-level 'runs'.\n\nDECISION RULES:\n- For this profile, you MUST return AT LEAST ONE 'generate_profile_file' action containing the full runs.json text in 'content'.\n- The 'actions' array MUST NOT be empty.\n- Do NOT invent new action types.\n- Do NOT output markdown.\n- Do NOT wrap the JSON in backticks.\n- Do NOT include any text outside the single JSON object."
+    },
+    {
+      "role": "user",
+      "content": "Runtime input for this request, as JSON:\n\n${agent_input}\n\nUse 'agent_input' to decide whether you are creating a new runs.json (no refactor.original_code) or updating an existing one (refactor.original_code present). Use fields such as 'goal', 'target_runs_path', or similar if present to choose the filename and structure of the plan."
+    },
+    {
+      "role": "user",
+      "content": "${task_description}"
+    }
+  ],
+
+  "response_format": { "type": "json_object" },
+  "user": "${default_user}"
+}
+
+
+
+================================================================================
+FILE: C:\projects\aiAgency\context_files\profiles\security_scan.json
+================================================================================
+
+{
+  "name": "security_scan",
+  "model": "gpt-4o",
+  "temperature": 0,
+  "top_p": 1,
+  "max_tokens": 1600,
+
+  "task_description": "Security scan of a single Python file. Decide whether to allow the run to continue or to abort based on detected vulnerabilities.",
+
+  "messages": [
+    {
+      "role": "system",
+      "content": "You are a senior Python security engineer working inside an AI-driven code-generation framework called aiAgency.\n\nYour ONLY job in this profile is to review given Python source code for security risks and then output a single control-flow action of type \"continue\" that either:\n- continues the run (no-op), or\n- breaks the run (by setting should_break = true).\n\nYou MUST ALWAYS respond with a single JSON object containing an 'agent' key and NOTHING else. No markdown, no prose, no backticks.\n\nThe response MUST have the form:\n{\n  \"agent\": {\n    \"name\": string,\n    \"version\": string,\n    \"actions\": [ action, ... ]\n  }\n}\n\nEach action is an object with:\n- \"type\": string\n- \"params\": object\n\nAllowed action types for THIS profile:\n\n1) \"continue\"\n   params:\n   {\n     \"should_break\": bool,    // if true, abort the run by raising RuntimeError\n     \"reason\": string | null  // short human-readable reason\n   }\n\nBehaviour:\n- You will receive a JSON object called 'agent_input'. When this profile is used for a security check, the code to inspect will be provided in agent_input.refactor.original_code (a single string containing the full Python file).\n- If agent_input.refactor.original_code is missing or empty, assume you cannot perform a meaningful security review and set should_break = true with an appropriate reason.\n\nSecurity review guidelines (non-exhaustive):\n- Look for obviously dangerous patterns, for example:\n  - use of eval/exec on untrusted data\n  - os.system / subprocess with shell=True and unvalidated inputs\n  - hard-coded secrets, tokens, or passwords\n  - arbitrary file writes/reads with unvalidated paths in externally reachable code\n  - insecure deserialization (e.g. pickle.loads on untrusted data)\n  - SQL built via string concatenation with untrusted values\n- Consider severity:\n  - Only set should_break = false if you see no significant vulnerabilities or only low-risk issues in this specific context.\n  - If you see high- or medium-risk issues, set should_break = true.\n\nDecision rules:\n- You MUST return AT LEAST ONE action.\n- The 'actions' array MUST NOT be empty.\n- You MUST NOT create any action types other than \"continue\" for this profile.\n\nOutput rules:\n- Do NOT output markdown.\n- Do NOT wrap the JSON in backticks.\n- Do NOT include any text outside the single JSON object."
+    },
+    {
+      "role": "user",
+      "content": "Runtime input for this security check, as JSON:\n\n${agent_input}\n\nThe Python file content to review (if available) is in agent_input.refactor.original_code. Base your decision ONLY on that code and the info in agent_input."
+    },
+    {
+      "role": "user",
+      "content": "${task_description}"
+    }
+  ],
+
+  "response_format": { "type": "json_object" },
+  "user": "${default_user}"
+}
+
+
+
+================================================================================
+FILE: C:\projects\aiAgency\context_files\profiles\validator.json
+================================================================================
+
+{
+  "name": "validator",
+  "model": "gpt-4o",
+  "temperature": 0,
+  "top_p": 1,
+  "max_tokens": 1600,
+  "task_description": "Validation of a single Python file. Decide whether the file has any syntax errors (and optionally basic structural issues) and either request a retry or allow the pipeline to continue.",
+  "messages": [
+    {
+      "role": "system",
+      "content": "You are a Python validation agent inside the aiAgency framework.\n\nYour primary job in this profile is to inspect a single Python source file and decide whether it is syntactically valid (and minimally reasonable) or clearly broken. Based on that, you either:\n- request that the run be retried with a better code generation profile, or\n- allow the pipeline to continue without requesting a retry.\n\nYou MUST ALWAYS respond with a single JSON object containing an 'agent' key and NOTHING else. No markdown, no prose, no backticks.\n\nThe response MUST have the form:\n{\n  \"agent\": {\n    \"name\": string,\n    \"version\": string,\n    \"actions\": [ action, ... ]\n  }\n}\n\nEach action is an object with:\n- \"type\": string\n- \"params\": object\n\nAllowed control action types for THIS profile:\n\n1) \"request_retry\"\n   params:\n   {\n     \"reason\": string  // short human-readable reason why a retry is needed\n   }\n\n2) \"continue\"\n   params:\n   {\n     \"should_break\": bool,    // MUST be false when used from this profile\n     \"reason\": string | null  // optional explanation\n   }\n\nBEHAVIOUR:\n- You will receive a JSON object called 'agent_input' (metadata about the current run).\n- The Python file content to validate will be provided as plain text via a CONTEXT BLOCK injected with the placeholder ${context_block} in a separate user message.\n- The CONTEXT BLOCK will contain exactly one Python file (optionally preceded by a header line like '=== CONTEXT FILE: <path> ===').\n- You MUST base your validation ONLY on the code contained in this CONTEXT BLOCK and any relevant metadata in agent_input.\n- You MUST NOT rely on or look for agent_input.refactor.original_code; assume it is not used.\n- If the CONTEXT BLOCK is empty, clearly missing, or does not appear to contain any Python code, you MUST output a single \"request_retry\" action with a reason explaining that the code is unavailable.\n\nSYNTAX VALIDATION GUIDELINES (PRIMARY FOCUS):\n- Treat this as a static syntax check:\n  - Look for obvious Python syntax errors such as:\n    - missing colons after def/class/if/for/while/elif/else/try/except/finally\n    - inconsistent indentation that would cause an IndentationError\n    - unmatched parentheses, brackets, or braces\n    - unclosed string literals\n  - You do NOT need to prove semantic correctness; focus on whether the file would likely fail to parse/compile.\n\nDECISION RULES:\n- If you detect ANY likely Python syntax error, you MUST:\n  - Output EXACTLY ONE action of type \"request_retry\" with a clear, concise 'reason' describing what seems wrong.\n- If you do NOT detect any syntax errors and the file looks structurally reasonable, you MUST:\n  - Output EXACTLY ONE action of type \"continue\" with params.should_break = false and an optional 'reason' summarising that the file looks acceptable.\n\nIMPORTANT ENGINE INTERACTION NOTES:\n- The engine will interpret the presence of a \"request_retry\" action as a signal to retry this run using alternative context (e.g. a different profile such as a normal code generator).\n- The engine may ignore the \"request_retry\" action when executing side-effect actions; its purpose is to control retry flow.\n- From this profile you MUST NOT attempt to write files or change the repository; do NOT emit \"file_write\" or other side-effect action types.\n\nOutput rules:\n- Do NOT output markdown.\n- Do NOT wrap the JSON in backticks.\n- Do NOT include any text outside the single JSON object."
+    },
+    {
+      "role": "user",
+      "content": "Runtime input for this validation, as JSON:\n\n${agent_input}"
+    },
+    {
+      "role": "user",
+      "content": "Python file content to validate (from context files):\n\n${context_block}"
+    }
+  ],
+  "response_format": { "type": "json_object" },
+  "user": "${default_user}"
+}
+
+
+
+================================================================================
+FILE: C:\projects\aiAgency\context_files\project\project_manifest_tetris.json
+================================================================================
+
+{ "project_name": "Tetris Game", "description": "A terminal-based Tetris game implemented in Python using the aiAgency framework.", "language": "Python", "root_path": "./tetris_game", "modules": [ { "name": "config", "description": "Handles game configuration settings.", "classes": [ { "name": "GameConfig", "description": "Stores configuration settings for the Tetris game.", "fields": [ { "name": "board_width", "type": "int", "description": "Width of the game board." }, { "name": "board_height", "type": "int", "description": "Height of the game board." }, { "name": "tick_rate", "type": "float", "description": "Game loop tick rate in seconds." } ], "methods": [ { "name": "load_from_file", "description": "Loads configuration settings from a file.", "params": { "file_path": "str" }, "return_type": "None" } ] } ] }, { "name": "tetromino", "description": "Represents Tetris pieces and their behaviors.", "classes": [ { "name": "Tetromino", "description": "Represents a Tetris piece.", "fields": [ { "name": "shape", "type": "List[List[int]]", "description": "Matrix representation of the tetromino shape." }, { "name": "position", "type": "Tuple[int, int]", "description": "Current position of the tetromino on the board." } ], "methods": [ { "name": "rotate", "description": "Rotates the tetromino shape.", "params": { "direction": "str" }, "return_type": "None" } ] } ] }, { "name": "board", "description": "Manages the game board state.", "classes": [ { "name": "GameBoard", "description": "Represents the Tetris game board.", "fields": [ { "name": "grid", "type": "List[List[int]]", "description": "2D grid representing the board state." } ], "methods": [ { "name": "clear_lines", "description": "Clears completed lines from the board.", "params": {}, "return_type": "int" } ] } ] }, { "name": "render", "description": "Handles rendering of the game state.", "classes": [ { "name": "Renderer", "description": "Renders the game board and tetrominos.", "fields": [], "methods": [ { "name": "render_board", "description": "Renders the current state of the game board.", "params": { "board": "GameBoard" }, "return_type": "None" } ] } ] }, { "name": "input", "description": "Handles user input.", "classes": [ { "name": "InputHandler", "description": "Processes user input for game control.", "fields": [], "methods": [ { "name": "get_input", "description": "Gets user input for controlling the game.", "params": {}, "return_type": "str" } ] } ] }, { "name": "game_loop", "description": "Controls the main game loop.", "classes": [ { "name": "GameLoop", "description": "Manages the game loop and state transitions.", "fields": [ { "name": "is_running", "type": "bool", "description": "Indicates if the game loop is running." } ], "methods": [ { "name": "start", "description": "Starts the game loop.", "params": {}, "return_type": "None" } ] } ] } ], "tests": [ { "name": "test_tetromino_rotation", "description": "Tests the rotation functionality of tetrominos.", "module": "tetromino", "class": "Tetromino", "method": "rotate" }, { "name": "test_line_clearing", "description": "Tests the line clearing functionality of the game board.", "module": "board", "class": "GameBoard", "method": "clear_lines" } ] }
+
+
+================================================================================
+FILE: C:\projects\aiAgency\context_files\rules\generic_rules.json
+================================================================================
+
+{
+  "agent_rules": [
+    {
+      "id": "clarity_01",
+      "rule": "Act only on information that is clearly understood.",
+      "intent": "Prevent incorrect actions caused by ambiguity.",
+      "constraints": [],
+      "notes": ""
+    },
+    {
+      "id": "clarity_02",
+      "rule": "Seek clarification only when a task cannot be completed without it.",
+      "intent": "Maintain efficiency while avoiding invalid assumptions.",
+      "constraints": [],
+      "notes": ""
+    },
+    {
+      "id": "goal_01",
+      "rule": "Align all actions strictly with the provided goal.",
+      "intent": "Ensure the agent remains purpose-driven.",
+      "constraints": [],
+      "notes": ""
+    },
+    {
+      "id": "goal_02",
+      "rule": "Avoid actions that do not contribute to the stated objective.",
+      "intent": "Reduce noise and irrelevant behavior.",
+      "constraints": [],
+      "notes": ""
+    },
+    {
+      "id": "consistency_01",
+      "rule": "Ensure responses are stable and internally consistent.",
+      "intent": "Maintain reliability and predictability.",
+      "constraints": [],
+      "notes": ""
+    },
+    {
+      "id": "precision_01",
+      "rule": "Provide information accurately and avoid unsupported assumptions.",
+      "intent": "Preserve trust and correctness.",
+      "constraints": [],
+      "notes": ""
+    },
+    {
+      "id": "restraint_01",
+      "rule": "Operate strictly within the boundaries of the request.",
+      "intent": "Prevent overreach and unnecessary expansion.",
+      "constraints": [],
+      "notes": ""
+    },
+    {
+      "id": "neutrality_01",
+      "rule": "Remain impartial and unbiased in all output.",
+      "intent": "Ensure fairness and neutrality.",
+      "constraints": [],
+      "notes": ""
+    },
+    {
+      "id": "safety_01",
+      "rule": "Avoid actions or information that could cause harm.",
+      "intent": "Prioritize user well-being and system integrity.",
+      "constraints": [],
+      "notes": ""
+    },
+    {
+      "id": "transparency_01",
+      "rule": "Acknowledge limitations when they materially affect output.",
+      "intent": "Promote clarity and trust.",
+      "constraints": [],
+      "notes": ""
+    },
+    {
+      "id": "coherence_01",
+      "rule": "Ensure all parts of the output support a unified meaning.",
+      "intent": "Maintain logical continuity.",
+      "constraints": [],
+      "notes": ""
+    },
+    {
+      "id": "focus_01",
+      "rule": "Concentrate on what is asked and omit irrelevant details.",
+      "intent": "Increase relevance and utility.",
+      "constraints": [],
+      "notes": ""
     }
   ]
 }
@@ -591,10 +649,19 @@ FILE: C:\projects\aiAgency\configs\tetris_onat.json
 
 
 ================================================================================
-FILE: C:\projects\aiAgency\configs\tetris_runs.json
+FILE: C:\projects\aiAgency\context_files\rules\project_rules.json
 ================================================================================
 
-{"runs": [{"profile_name": "code_generation", "class_name": "tetris/config.py", "task_description": "Create the configuration module for the Tetris game. This module should define constants and settings used throughout the game, such as screen dimensions, colors, and game speed.\n\nIMPLEMENTATION RULES (MANDATORY):\n- The module must define a class or set of constants that can be easily imported by other modules.\n- Ensure that all configuration values are clearly named and documented.\n- Do not include any game logic or rendering code in this module.\n\nPROJECT_STRUCTURE\nTetris Game Project Structure:\n- tetris/config.py: Configuration settings and constants.\n- tetris/tetromino.py: Tetromino class definitions and logic.\n- tetris/board.py: Game board management and logic.\n- tetris/renderer.py: Rendering logic for the game.\n- tetris/input_handler.py: Input handling logic.\n- tetris/game_loop.py: Main game loop and logic.\n- tetris/main.py: Entry point for the game."}, {"profile_name": "code_generation", "class_name": "tetris/tetromino.py", "task_description": "Develop the Tetromino module for the Tetris game. This module should define the Tetromino class, including its shape, rotation, and movement logic.\n\nIMPLEMENTATION RULES (MANDATORY):\n- The Tetromino class must support different shapes and rotations.\n- Implement methods for moving and rotating tetrominoes.\n- Ensure that the class can be easily integrated with the game board logic.\n\nPROJECT_STRUCTURE\nTetris Game Project Structure:\n- tetris/config.py: Configuration settings and constants.\n- tetris/tetromino.py: Tetromino class definitions and logic.\n- tetris/board.py: Game board management and logic.\n- tetris/renderer.py: Rendering logic for the game.\n- tetris/input_handler.py: Input handling logic.\n- tetris/game_loop.py: Main game loop and logic.\n- tetris/main.py: Entry point for the game."}, {"profile_name": "code_generation", "class_name": "tetris/board.py", "task_description": "Implement the Board module for the Tetris game. This module should manage the game board, including placing tetrominoes and checking for completed lines.\n\nIMPLEMENTATION RULES (MANDATORY):\n- The Board class must handle tetromino placement and line clearing.\n- Implement methods for checking and clearing completed lines.\n- Ensure that the board can interact with the Tetromino class.\n\nPROJECT_STRUCTURE\nTetris Game Project Structure:\n- tetris/config.py: Configuration settings and constants.\n- tetris/tetromino.py: Tetromino class definitions and logic.\n- tetris/board.py: Game board management and logic.\n- tetris/renderer.py: Rendering logic for the game.\n- tetris/input_handler.py: Input handling logic.\n- tetris/game_loop.py: Main game loop and logic.\n- tetris/main.py: Entry point for the game."}, {"profile_name": "code_generation", "class_name": "tetris/renderer.py", "task_description": "Create the Renderer module for the Tetris game. This module should handle all rendering logic, drawing the game board and tetrominoes on the screen.\n\nIMPLEMENTATION RULES (MANDATORY):\n- The Renderer class must draw the game board and active tetrominoes.\n- Implement methods for updating the display and handling screen refreshes.\n- Ensure that rendering is efficient and does not impact game performance.\n\nPROJECT_STRUCTURE\nTetris Game Project Structure:\n- tetris/config.py: Configuration settings and constants.\n- tetris/tetromino.py: Tetromino class definitions and logic.\n- tetris/board.py: Game board management and logic.\n- tetris/renderer.py: Rendering logic for the game.\n- tetris/input_handler.py: Input handling logic.\n- tetris/game_loop.py: Main game loop and logic.\n- tetris/main.py: Entry point for the game."}, {"profile_name": "code_generation", "class_name": "tetris/input_handler.py", "task_description": "Develop the Input Handler module for the Tetris game. This module should manage user input, translating key presses into game actions.\n\nIMPLEMENTATION RULES (MANDATORY):\n- The InputHandler class must capture and process user input.\n- Implement methods for handling key presses and mapping them to game actions.\n- Ensure that input handling is responsive and does not lag.\n\nPROJECT_STRUCTURE\nTetris Game Project Structure:\n- tetris/config.py: Configuration settings and constants.\n- tetris/tetromino.py: Tetromino class definitions and logic.\n- tetris/board.py: Game board management and logic.\n- tetris/renderer.py: Rendering logic for the game.\n- tetris/input_handler.py: Input handling logic.\n- tetris/game_loop.py: Main game loop and logic.\n- tetris/main.py: Entry point for the game."}, {"profile_name": "code_generation", "class_name": "tetris/game_loop.py", "task_description": "Implement the Game Loop module for the Tetris game. This module should manage the main game loop, updating game state and rendering frames.\n\nIMPLEMENTATION RULES (MANDATORY):\n- The GameLoop class must manage the main game loop and timing.\n- Implement methods for updating game state and rendering frames.\n- Ensure that the game loop runs smoothly and efficiently.\n\nPROJECT_STRUCTURE\nTetris Game Project Structure:\n- tetris/config.py: Configuration settings and constants.\n- tetris/tetromino.py: Tetromino class definitions and logic.\n- tetris/board.py: Game board management and logic.\n- tetris/renderer.py: Rendering logic for the game.\n- tetris/input_handler.py: Input handling logic.\n- tetris/game_loop.py: Main game loop and logic.\n- tetris/main.py: Entry point for the game."}, {"profile_name": "code_generation", "class_name": "tetris/main.py", "task_description": "Create the main entry point for the Tetris game. This module should initialize the game and start the main game loop.\n\nIMPLEMENTATION RULES (MANDATORY):\n- The main module must initialize all game components and start the game loop.\n- Ensure that the game can be started by running this module.\n- Do not include any game logic or rendering code directly in this module.\n\nPROJECT_STRUCTURE\nTetris Game Project Structure:\n- tetris/config.py: Configuration settings and constants.\n- tetris/tetromino.py: Tetromino class definitions and logic.\n- tetris/board.py: Game board management and logic.\n- tetris/renderer.py: Rendering logic for the game.\n- tetris/input_handler.py: Input handling logic.\n- tetris/game_loop.py: Main game loop and logic.\n- tetris/main.py: Entry point for the game."}]}
+{
+  "project_name": "aiAgency",
+  "rules": [
+    "All source files must be placed under the 'core' or 'app' packages.",
+    "Logging must use the project-wide logger from 'core.logging.logger'.",
+    "Configuration must be read via 'core.config.run_config.RunConfig'.",
+    "Public APIs must not hard-code file system paths; use helpers from 'core.files.path_utils'."
+  ]
+}
+
 
 
 ================================================================================
@@ -602,28 +669,30 @@ FILE: C:\projects\aiAgency\core\calculator.py
 ================================================================================
 
 # === CONTEXT START ===
-# This file defines a Calculator class with basic arithmetic operations: addition,
-# subtraction, multiplication, and division. The division method handles division
-# by zero by raising a ValueError.
+# This module defines a reusable Calculator class in Python.
+# The class provides basic arithmetic operations such as addition,
+# subtraction, multiplication, and division.
 # === CONTEXT END ===
 
 class Calculator:
-    """A simple calculator class to perform basic arithmetic operations."""
+    """
+    A simple calculator class to perform basic arithmetic operations.
+    """
 
-    def add(self, a: float, b: float) -> float:
+    def add(self, a, b):
         """Return the sum of a and b."""
         return a + b
 
-    def subtract(self, a: float, b: float) -> float:
+    def subtract(self, a, b):
         """Return the difference of a and b."""
         return a - b
 
-    def multiply(self, a: float, b: float) -> float:
+    def multiply(self, a, b):
         """Return the product of a and b."""
         return a * b
 
-    def divide(self, a: float, b: float) -> float:
-        """Return the division of a by b. Raise ValueError if b is zero."""
+    def divide(self, a, b):
+        """Return the quotient of a and b. Raises ValueError on division by zero."""
         if b == 0:
             raise ValueError("Cannot divide by zero.")
         return a / b
@@ -689,10 +758,11 @@ from typing import Any, Dict, Mapping
 @dataclass
 class ActionContext:
     project_root: Any
-    class_generator: Any
+    file_writer: Any        # <- was class_generator
     git_manager: Any
     repo_config: Any
     logger: Any
+
 
 class BaseAction:
     """
@@ -776,53 +846,101 @@ ActionRegistry.register(ContinueAction)
 
 
 ================================================================================
-FILE: C:\projects\aiAgency\core\actions\generate_class_file.py
+FILE: C:\projects\aiAgency\core\actions\file_read.py
 ================================================================================
 
-# core/actions/generate_class_file.py
+# core/actions/file_read.py
+from pathlib import Path
+from .base_action import BaseAction, ActionContext
+from .registry import ActionRegistry
+from core.files.class_reader import PythonFileReader
+
+
+class FileReadAction(BaseAction):
+    """
+    Action that reads a file under project_root and logs that it was read.
+
+    Expected params:
+      - target_path: str (relative to project root)
+
+    NOTE: At the moment this only logs; the pipeline doesn't surface
+    the file content back to the model in the same run.
+    """
+
+    action_type = "file_read"
+
+    def validate(self) -> bool:
+        target_path = self.params.get("target_path")
+        return isinstance(target_path, str) and bool(target_path)
+
+    def execute(self, ctx: ActionContext) -> None:
+        if not self.validate():
+            ctx.logger.warning(f"[file_read] Invalid params: {self.params!r}")
+            return
+
+        target_path: str = self.params["target_path"]
+        full_path = Path(ctx.project_root) / target_path
+
+        reader = PythonFileReader(str(full_path))
+        content = reader.read_file()
+
+        ctx.logger.info(
+            f"[file_read] Read file '{full_path}' "
+            f"({len(content)} characters)"
+        )
+
+# Register
+ActionRegistry.register(FileReadAction)
+
+
+
+================================================================================
+FILE: C:\projects\aiAgency\core\actions\file_write.py
+================================================================================
+
+# core/actions/file_write.py
 from pathlib import Path
 from .base_action import BaseAction, ActionContext
 from .registry import ActionRegistry
 
 
-class GenerateClassFileAction(BaseAction):
-    action_type = "generate_class_file"
+class FileWriteAction(BaseAction):
+    action_type = "file_write"
 
     def validate(self) -> bool:
-        if not isinstance(self.params.get("target_path"), str):
-            return False
-        if not isinstance(self.params.get("code"), str):
-            return False
-        return True
+        code = self.params.get("code")
+        return isinstance(code, str)
 
     def execute(self, ctx: ActionContext) -> None:
-        logger = ctx.logger
+        if not self.validate():
+            ctx.logger.warning(f"[file_write] Invalid params: {self.params!r}")
+            return
 
-        target_path = self.params["target_path"]
-        code = self.params["code"]
-        context_text = self.params.get("context", "")
+        agent_path: str = self.params.get("target_path", "") or ""
 
-        target_rel_path = Path(target_path)
-        abs_target_dir = (ctx.project_root / target_rel_path).parent
-        abs_target_dir.mkdir(parents=True, exist_ok=True)
-
-        gen = ctx.class_generator
-        original_base = gen.base_path
-        try:
-            gen.base_path = str(abs_target_dir)
-            generated_path = gen.generate_with_comments(
-                filename=target_rel_path.name,
-                content=code,
-                comments=context_text,
+        # Engine source of truth
+        effective_path = getattr(ctx, "target_file", None) or agent_path
+        if not effective_path:
+            ctx.logger.error(
+                "[file_write] No effective target path: "
+                "ctx.target_file and params.target_path are both empty"
             )
-        finally:
-            gen.base_path = original_base
+            return
 
-        logger.info(f"Generated class file at: {generated_path}")
+        code: str = self.params["code"]
+        _context_text = self.params.get("context", "")
+
+        ctx.logger.info(
+            f"[file_write] Writing file '{effective_path}' "
+            f"(ctx.target_file={getattr(ctx, 'target_file', None)!r}, "
+            f"agent_path={agent_path!r})"
+        )
+        written_path = ctx.file_writer.write_file(effective_path, code)
+        ctx.logger.info(f"[file_write] File written at: {written_path}")
 
 
-# 👇 THIS LINE IS CRITICAL
-ActionRegistry.register(GenerateClassFileAction)
+# Register with the registry
+ActionRegistry.register(FileWriteAction)
 
 
 
@@ -892,15 +1010,11 @@ class GenerateProfileFileAction(BaseAction):
     def execute(self, ctx) -> None:
         target_path = self.params['target_path']
         content = self.params['content']
-        context = self.params.get('context', '')
+        _context = self.params.get('context', '')
 
-        full_path = Path(ctx.project_root) / target_path
-        full_path.parent.mkdir(parents=True, exist_ok=True)
+        full_path = ctx.file_writer.write_file(target_path, content)
+        logger.info(f"[generate_profile_file] Wrote profile file at {full_path}")
 
-        with full_path.open('w', encoding='utf-8') as file:
-            file.write(content)
-
-        logger.info(f"Generated file at {full_path.absolute()}. {context}")
 
 ActionRegistry.register(GenerateProfileFileAction)
 
@@ -969,24 +1083,78 @@ class ActionRegistry:
 
 
 ================================================================================
-FILE: C:\projects\aiAgency\core\actions\__init__.py
+FILE: C:\projects\aiAgency\core\actions\request_retry.py
 ================================================================================
 
+# core/actions/request_retry.py
+
 # === CONTEXT START ===
-# Added the import for generate_profile_file to ensure it self-registers in the
-# ActionRegistry. Preserved existing imports and comments, including keeping
-# git_commit_and_push commented out. Maintained consistent formatting and kept the
-# # noqa: F401 comments.
+# Action that allows an agent to explicitly request a retry of the current run.
+# It does not perform any side effects on disk or Git; it only sets flags on the
+# ActionRuntimeContext so the orchestrator (main.py) can decide whether to
+# repeat this run.
 # === CONTEXT END ===
+
+from typing import Optional
+
+from .base_action import BaseAction, ActionContext
+from .registry import ActionRegistry
+
+
+class RequestRetryAction(BaseAction):
+    """Action used by agents to request that the current run be retried.
+
+    Expected params:
+        - reason: Optional[str]  (short explanation logged by the engine)
+    """
+
+    action_type = "request_retry"
+
+    def validate(self) -> bool:
+        reason = self.params.get("reason")
+        if reason is not None and not isinstance(reason, str):
+            return False
+        return True
+
+    def execute(self, ctx: ActionContext) -> None:
+        # The concrete runtime context (ActionRuntimeContext) has
+        # retry_requested / retry_reason fields.
+        setattr(ctx, "retry_requested", True)
+        reason: Optional[str] = self.params.get("reason")
+        setattr(ctx, "retry_reason", reason)
+
+        logger = getattr(ctx, "logger", None)
+        if logger is not None:
+            if reason:
+                logger.info(
+                    "[request_retry] Agent requested retry for this run: %s",
+                    reason,
+                )
+            else:
+                logger.info(
+                    "[request_retry] Agent requested retry for this run (no reason provided)."
+                )
+
+
+# Register
+ActionRegistry.register(RequestRetryAction)
+
+
+
+================================================================================
+FILE: C:\projects\aiAgency\core\actions\__init__.py
+================================================================================
 
 # core/actions/__init__.py
 
 # Import all action modules here so they self-register in the registry.
-from . import generate_class_file  # noqa: F401
-# from . import git_commit_and_push  # noqa: F401
-from . import generate_test_file   # noqa: F401
-from . import continue_action      # noqa: F401
-from . import generate_profile_file  # noqa: F401
+from . import file_write            # noqa: F401
+from . import file_read             # noqa: F401
+# from . import git_commit_and_push   # noqa: F401
+from . import generate_test_file    # noqa: F401
+from . import continue_action       # noqa: F401
+from . import generate_profile_file # noqa: F401
+from . import request_retry         # noqa: F401
 
 
 
@@ -1587,7 +1755,6 @@ class RunItem:
     class_name: Optional[str] = None           # optional in new mode
     task_description: str = ""                 # still required logically
 
-    refactor_class: str = ""                   # used by main.py / app.main
     rules: List[str] = field(default_factory=list)
     extra_params: Dict[str, Any] = field(default_factory=dict)
     agent_input: Dict[str, Any] = field(default_factory=dict)
@@ -1595,6 +1762,11 @@ class RunItem:
     # NEW fields
     context_file: List[str] = field(default_factory=list)
     target_file: str = ""
+
+    # RETRY / CONTROL FIELDS
+    retry: int = 0
+    retry_context_files: List[str] = field(default_factory=list)
+    allowed_actions: List[str] = field(default_factory=list)
 
     # full raw dict for future use
     raw: Dict[str, Any] = field(default_factory=dict)
@@ -1655,7 +1827,9 @@ class RunConfig:
                 task_description = _get_field(item, "task_description", required=True)
 
                 # Normalize context_file to a list[str]
-                context_file_raw = item.get("context_file") or item.get("context_files") or []
+                context_file_raw = (
+                    item.get("context_file") or item.get("context_files") or []
+                )
                 if isinstance(context_file_raw, str):
                     context_file = [context_file_raw]
                 elif isinstance(context_file_raw, list):
@@ -1667,23 +1841,11 @@ class RunConfig:
 
                 target_file = str(item.get("target_file", ""))
 
-                refactor_class = _get_field(
-                    item, "refactor_class", required=False, default=""
-                )
-
             else:
                 # OLD MODE: profile_name/class_name/task_description required
                 profile_name = _get_field(item, "profile_name", required=True)
                 class_name = _get_field(item, "class_name", required=True)
                 task_description = _get_field(item, "task_description", required=True)
-                refactor_class = _get_field(
-                    item, "refactor_class", required=False, default=""
-                )
-
-                # Heuristic: for refactor-type profiles, if no explicit refactor_class is
-                # provided, assume we refactor the same file as class_name.
-                if not refactor_class and "refactor" in str(profile_name).lower():
-                    refactor_class = class_name
 
                 context_file = []   # none in old mode
                 target_file = ""    # none in old mode
@@ -1693,126 +1855,126 @@ class RunConfig:
             extra_params = item.get("extra_params", {})
             agent_input = item.get("agent_input", {})
 
+            # Retry + control fields
+            retry_raw = item.get("retry", 0)
+            try:
+                retry = int(retry_raw)
+            except (TypeError, ValueError):
+                retry = 0
+
+            retry_ctx_raw = item.get("retry_context_files") or []
+            if isinstance(retry_ctx_raw, str):
+                retry_context_files = [retry_ctx_raw]
+            elif isinstance(retry_ctx_raw, list):
+                retry_context_files = [str(x) for x in retry_ctx_raw]
+            else:
+                retry_context_files = []
+
+            allowed_actions_raw = item.get("allowed_actions") or []
+            if isinstance(allowed_actions_raw, str):
+                allowed_actions = [allowed_actions_raw]
+            elif isinstance(allowed_actions_raw, list):
+                allowed_actions = [str(x) for x in allowed_actions_raw]
+            else:
+                allowed_actions = []
+
             runs.append(
                 RunItem(
                     profile_name=str(profile_name),
                     class_name=str(class_name) if class_name is not None else None,
                     task_description=str(task_description),
-                    refactor_class=str(refactor_class) if refactor_class is not None else "",
                     rules=list(rules) if isinstance(rules, list) else [],
-                    extra_params=dict(extra_params) if isinstance(extra_params, dict) else {},
-                    agent_input=dict(agent_input) if isinstance(agent_input, dict) else {},
+                    extra_params=(
+                        dict(extra_params) if isinstance(extra_params, dict) else {}
+                    ),
+                    agent_input=(
+                        dict(agent_input) if isinstance(agent_input, dict) else {}
+                    ),
                     context_file=context_file,
                     target_file=target_file,
+                    retry=retry,
+                    retry_context_files=retry_context_files,
+                    allowed_actions=allowed_actions,
                     raw=dict(item),
                 )
             )
-
 
         return RunConfig(runs)
 
 
 
 ================================================================================
-FILE: C:\projects\aiAgency\core\files\class_generator.py
+FILE: C:\projects\aiAgency\core\context\context_loader.py
 ================================================================================
 
-# === CONTEXT START ===
-# Added logging to the ClassGenerator class using BasicLogger. A logger instance
-# is created in the __init__ method, and an info log is added in the generate
-# method to log when a file is being generated.
-# === CONTEXT END ===
+# core/context/context_loader.py
+from __future__ import annotations
 
-# === CONTEXT START ===
-# The ClassGenerator class is responsible for writing Python source code to disk
-# and ensuring that generated files are saved in a clean, structured, and
-# predictable way. It serves as the main output layer of the AI-driven
-# code-generation pipeline, receiving raw code strings from the model and
-# converting them into .py files located within the configured project
-# directory.
-#
-# The class provides two modes of operation: a basic file-generation method that
-# writes code exactly as received, and an enhanced method that automatically
-# prefixes the file with a formatted CONTEXT block. This comment block embeds
-# human-readable metadata or explanation produced by the AI, wrapped to 80
-# characters for readability and delimited with START and END markers. This
-# allows each generated file to carry its own reasoning, intent, or description,
-# which becomes valuable for future maintenance, refactoring, and tracing logic.
-#
-# To maintain portability and prevent unexpected filesystem errors, the class
-# guarantees that the target output directory is created on initialization. It
-# performs no interpretation of the code itself; its sole responsibility is to
-# accurately persist the given content to the filesystem in a clean and
-# repeatable manner, forming the foundation for downstream processes such as Git
-# commits or subsequent model iterations.
-# === CONTEXT END ===
+import json
+from pathlib import Path
+from typing import Any, Dict, List
 
-import os
-import textwrap
-from typing import Optional
-from core.logger import BasicLogger
 
-class ClassGenerator:
+def load_context_params(project_root: Path, context_files: List[str]) -> Dict[str, Any]:
+    """Load one or more context files and build a single OpenAI payload dict.
+
+    Convention:
+    - The FIRST file MUST be a JSON profile with a complete OpenAI payload:
+        { "model": "...", "messages": [...], "temperature": ..., ... }
+    - ALL remaining files (JSON or not) are treated as extra textual context.
+      Their raw content is concatenated into a single 'context_block' string,
+      which the profile can inject via a ${context_block} placeholder.
+
+    The returned dict is the raw OpenAI request payload. A special meta key
+    `_context_block` is optionally added and later consumed by the prompt
+    rewriter.
     """
-    Generates a .py file from a provided string at the specified path.
-    """
+    if not context_files:
+        raise ValueError("Run is missing 'context_file'. At least one path is required.")
 
-    def __init__(self, base_path: str):
-        """
-        Initialize the file generator with the base path for output.
-        :param base_path: Directory where the .py file will be created.
-        """
-        self.logger = BasicLogger(self.__class__.__name__).get_logger()
-        self.base_path = os.path.abspath(base_path)
-        os.makedirs(self.base_path, exist_ok=True)
+    # 1) Load the profile JSON (first file)
+    first = context_files[0]
+    profile_path = (project_root / first).resolve()
 
-    def _build_comment_block(self, comments: str) -> str:
-        """
-        Build a readable, wrapped, multi-line Python comment block.
-        Long lines are wrapped at ~80 characters for readability.
-        """
-        if not comments or not comments.strip():
-            return ""
+    if not profile_path.exists():
+        raise FileNotFoundError(f"context_file not found: {profile_path}")
 
-        # Wrap long text into multiple lines (80 chars per line)
-        wrapped = textwrap.fill(comments.strip(), width=80)
-        lines = wrapped.split("\n")
+    with profile_path.open("r", encoding="utf-8") as f:
+        params = json.load(f)
 
-        header = ["# === CONTEXT START ==="]
-        header.extend(f"# {line}" for line in lines)
-        header.append("# === CONTEXT END ===")
-        header.append("")  # blank line after the block
+    if not isinstance(params, dict):
+        raise ValueError(f"context_file must contain a JSON object: {profile_path}")
 
-        return "\n".join(header)
+    # 2) Load remaining files as raw text and aggregate
+    text_blocks: List[str] = []
 
-    def generate(self, filename: str, content: str) -> str:
-        """
-        Writes the given string content to a .py file in the base path.
-        :param filename: Name of the file (without .py extension).
-        :param content: Python source code to write.
-        :return: Full path of the generated file.
-        """
-        self.logger.info(f"Generating file: {filename}")
-        if not filename.endswith(".py"):
-            filename = f"{filename}.py"
+    for rel in context_files[1:]:
+        path = (project_root / rel).resolve()
+        if not path.exists():
+            raise FileNotFoundError(f"extra context_file not found: {path}")
 
-        full_path = os.path.join(self.base_path, filename)
+        try:
+            raw = path.read_text(encoding="utf-8")
+        except UnicodeDecodeError:
+            # Non-text or non-UTF8 files are skipped for safety.
+            continue
 
-        with open(full_path, "w", encoding="utf-8") as f:
-            f.write(content)
+        header = f"=== CONTEXT FILE: {rel} ===\n"
+        text_blocks.append(header + raw.strip() + "\n")
 
-        return full_path
+    if text_blocks:
+        context_block = "\n\n".join(text_blocks)
+        # Store as meta field; the prompt layer will inject via ${context_block}
+        params["_context_block"] = context_block
 
-    def generate_with_comments(self, filename: str, content: str, comments: Optional[str] = None) -> str:
-        """
-        Writes the given content to a .py file, optionally prefixed with a
-        formatted comment block built from the provided comments string.
-        """
-        if comments:
-            comment_block = self._build_comment_block(comments)
-            content = f"{comment_block}\n{content}"
+    return params
 
-        return self.generate(filename, content)
+
+
+================================================================================
+FILE: C:\projects\aiAgency\core\context\__init__.py
+================================================================================
+
 
 
 
@@ -1858,6 +2020,47 @@ class PythonFileReader:
 # reader = PythonFileReader('example.py')
 # code_string = reader.read_file()
 # print(code_string)
+
+
+
+================================================================================
+FILE: C:\projects\aiAgency\core\files\file_writer.py
+================================================================================
+
+# core/files/file_writer.py
+
+from pathlib import Path
+from core.logger import BasicLogger
+
+
+class FileWriter:
+    """
+    Minimal primitive for writing text files under the project root.
+    It takes a target_path (relative to project_root) and the full file content.
+    """
+
+    def __init__(self, project_root: Path):
+        self.project_root = Path(project_root)
+        self.logger = BasicLogger(self.__class__.__name__).get_logger()
+
+    def write_file(self, target_path: str, content: str) -> Path:
+        """
+        Write the given content to project_root / target_path.
+
+        :param target_path: Path relative to project_root (e.g. "core/module.py").
+        :param content: Full file contents.
+        :return: Absolute Path of the written file.
+        """
+        rel_path = Path(target_path)
+        full_path = self.project_root / rel_path
+
+        full_path.parent.mkdir(parents=True, exist_ok=True)
+        self.logger.info(f"[FileWriter] Writing file: {full_path}")
+
+        with full_path.open("w", encoding="utf-8") as f:
+            f.write(content)
+
+        return full_path
 
 
 
@@ -2081,60 +2284,516 @@ class RepoConfig:
 
 
 ================================================================================
-FILE: C:\projects\aiAgency\core\services\refactor_service.py
+FILE: C:\projects\aiAgency\core\prompt\agent_input_builder.py
 ================================================================================
 
-# === CONTEXT START ===
-# Added logging to the RefactorService class using BasicLogger. A logger instance
-# is created in the __init__ method, and an info log is added in the
-# build_messages method to indicate when message building starts.
-# === CONTEXT END ===
+# core/prompt/agent_input_builder.py
+from __future__ import annotations
 
+import json
+from typing import Any, Dict, List, Optional
+
+from core.config.run_config import RunItem
 from core.files.class_reader import PythonFileReader
+
+
+from typing import Any, Dict, List, Optional
+
+from core.config.run_config import RunItem
+
+
+def build_agent_input(
+    run_item: RunItem,
+    profile_name: str,
+    class_name: Optional[str],
+    base_agent_input: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Construct the agent_input object passed into the model.
+
+    This combines:
+    - static runtime info (profile_name, class_name)
+    - per-run agent_input overrides from the config
+    - the target_file path if present
+    """
+    agent_input_obj: Dict[str, Any] = {
+        "profile_name": profile_name,
+        "class_name": class_name or None,
+    }
+
+    # Merge any extra agent_input passed from the run (optional)
+    if isinstance(base_agent_input, dict) and base_agent_input:
+        agent_input_obj.update(base_agent_input)
+
+    if run_item.target_file:
+        agent_input_obj["target_file"] = run_item.target_file
+
+    return agent_input_obj
+
+
+
+def build_rules_block_for_run(run_item: RunItem) -> str:
+    """Build a markdown-style rules block string for this run.
+
+    - Uses per-run rules from runs.json (run_item.rules).
+    - Optionally defines a few global rules in base_rules.
+    - Deduplicates while preserving order.
+    """
+    base_rules: List[str] = [
+        "Always respond strictly in the required JSON envelope.",
+        "Never output markdown or prose outside the specified JSON format.",
+    ]
+
+    run_rules = run_item.rules or []
+
+    combined: List[str] = []
+    for r in base_rules + run_rules:
+        if r not in combined:
+            combined.append(r)
+
+    return "\n".join(f"- {r}" for r in combined)
+
+
+def inject_placeholders(
+    run_params: Dict[str, Any],
+    agent_input_obj: Dict[str, Any],
+    rules_block: str,
+    task_description: str,
+    target_file: Optional[str],
+    context_block: str,
+) -> None:
+    """Replace placeholder tokens in the OpenAI payload messages.
+
+    Mutates `run_params` in-place. It expects the payload to have a `messages`
+    list compatible with the OpenAI Chat Completions API.
+    """
+    agent_input_json = json.dumps(agent_input_obj, ensure_ascii=False, indent=2)
+
+    for msg in run_params.get("messages", []):
+        content = msg.get("content")
+        if not isinstance(content, str):
+            continue
+
+        if "${agent_input}" in content:
+            content = content.replace("${agent_input}", agent_input_json)
+
+        if "${task_description}" in content:
+            content = content.replace("${task_description}", task_description or "")
+
+        if "${rules_block}" in content:
+            content = content.replace("${rules_block}", rules_block)
+
+        if "${target_file}" in content:
+            content = content.replace("${target_file}", target_file or "")
+
+        if "${context_block}" in content:
+            content = content.replace("${context_block}", context_block or "")
+
+        msg["content"] = content
+
+
+
+================================================================================
+FILE: C:\projects\aiAgency\core\prompt\__init__.py
+================================================================================
+
+
+
+
+================================================================================
+FILE: C:\projects\aiAgency\core\runtime\app_runner.py
+================================================================================
+
+# core/runtime/app_runner.py
+from __future__ import annotations
+
+import os
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any, Dict, List, Optional
+
 from core.logger import BasicLogger
+from core.ai_client.ai_client import OpenAIClient
+from core.ai_client.ai_response_parser import AIResponseParser
+from core.files.file_writer import FileWriter
+from core.actions.registry import ActionRegistry
+from core.actions.base_action import ActionContext
+from core.git.repo_config import RepoConfig
+from core.git.git_client import GitClient
+from core.git.git_manager import GitManager
+from core.config.run_config import RunItem
+from core.prompt.agent_input_builder import (
+    build_agent_input,
+    build_rules_block_for_run,
+    inject_placeholders,
+)
 
-class RefactorService:
+
+@dataclass
+class RunResult:
+    """Result of a single model invocation / action execution cycle."""
+
+    success: bool
+    retry_requested: bool = False
+    retry_reason: Optional[str] = None
+
+
+@dataclass
+class ActionRuntimeContext(ActionContext):
+    """Concrete runtime context passed to actions.
+
+    Extends ActionContext with additional fields used by specific actions and
+    by the orchestrator (e.g. retry flags).
     """
-    Prepares refactor messages for the model by injecting file content
-    and optional class name hints into a clean, deterministic message structure.
+
+    target_file: Optional[str] = None
+    retry_requested: bool = False
+    retry_reason: Optional[str] = None
+
+
+def execute_actions(actions_list: List[Dict[str, Any]], ctx: ActionRuntimeContext) -> None:
+    """Instantiate and execute actions using the registry."""
+    logger = ctx.logger
+
+    for index, raw in enumerate(actions_list, start=1):
+        action = ActionRegistry.create(raw)
+        if action is None:
+            logger.warning(
+                "Unknown or unregistered action '%s'. Allowed: %s",
+                raw.get("type"),
+                ActionRegistry.allowed_types(),
+            )
+            continue
+
+        if not action.validate():
+            logger.warning(
+                "Invalid params for action '%s': %r", action.action_type, raw
+            )
+            continue
+
+        logger.info("Executing action #%s: %s", index, action.action_type)
+        action.execute(ctx)
+
+
+class AppRunner:
+    """High-level orchestrator for one OpenAI call + action execution.
+
+    Responsibilities:
+    - Initialize infrastructure (logging, Git, file system, OpenAI client).
+    - Build agent_input and inject it + rules/context into the payload.
+    - Call OpenAI and parse an 'agent' response.
+    - Filter and execute actions via the registry.
+    - Surface success / retry_requested flags to the outer orchestration layer.
     """
 
-    def __init__(self, file_path: str, class_name: str | None = None):
-        self.logger = BasicLogger(self.__class__.__name__).get_logger()
-        self.file_path = file_path
-        self.class_name = class_name
+    def __init__(self, project_root: Path) -> None:
+        self.project_root = project_root
 
-    def build_messages(self) -> list[dict]:
-        self.logger.info('Building messages for refactoring')
-        reader = PythonFileReader(self.file_path)
-        content = reader.read_file()
+        self.logger = BasicLogger(__name__).get_logger()
 
-        class_hint = (
-            f"\nFocus on improving the class named `{self.class_name}`.\n"
-            if self.class_name else ""
+        # Git / repo configuration
+        repo_config = RepoConfig(
+            repo_path=str(project_root),
+            default_branch="master",
+            remote_name="origin",
+            author_name="Onat Agent",
+            author_email="onat@gegeoglu.com",
+        )
+        self.repo_config = repo_config
+        self.git_client = GitClient(repo_path=repo_config.repo_path)
+        self.git_manager = GitManager(git_client=self.git_client)
+
+        # File writer for side effects
+        self.file_writer = FileWriter(project_root=project_root)
+
+        # OpenAI client
+        api_key = os.getenv("OPENAI_API_KEY")
+        if not api_key:
+            raise RuntimeError("OPENAI_API_KEY is not set in environment")
+
+        self.client = OpenAIClient(api_key=api_key)
+
+    # ------------------------------------------------------------------
+    # Public API
+    # ------------------------------------------------------------------
+
+    def run(
+        self,
+        run_item: RunItem,
+        run_params: Dict[str, Any],
+        profile_name: str,
+        class_name: Optional[str],
+        task_description: str,
+        agent_input_overrides: Dict[str, Any],
+    ) -> RunResult:
+
+        """Execute a single model call + actions for the given run.
+
+        `run_params` must already be a valid OpenAI payload (model, messages, ...).
+        Any meta key `_context_block` is consumed and injected into prompts.
+        """
+        logger = self.logger
+        logger.info("Starting AppRunner for profile '%s'", profile_name)
+
+        context_files_display = run_params.pop("_context_files_display", None)
+        if context_files_display:
+            logger.info("Using context files: %s", context_files_display)
+
+        # Build agent_input, rules, and inject placeholders into messages
+        agent_input_obj = build_agent_input(
+            run_item=run_item,
+            profile_name=profile_name,
+            class_name=class_name,
+            base_agent_input=agent_input_overrides,
         )
 
-        system_msg = {
-            "role": "system",
-            "content": (
-                "You are a senior Python engineer. Refactor the provided code into a "
-                "clean, maintainable, readable, idiomatic form. Preserve external "
-                "behavior and public API. Do not add comments explaining changes."
-            )
-        }
 
-        user_msg = {
-            "role": "user",
-            "content": (
-                f"Refactor the following file.{class_hint}\n"
-                "Return ONLY the final refactored Python code.\n\n"
-                "```python\n"
-                f"{content}\n"
-                "```"
-            )
-        }
+        rules_block = build_rules_block_for_run(run_item)
+        context_block = run_params.pop("_context_block", "")
 
-        return [system_msg, user_msg]
+        inject_placeholders(
+            run_params=run_params,
+            agent_input_obj=agent_input_obj,
+            rules_block=rules_block,
+            task_description=task_description,
+            target_file=run_item.target_file,
+            context_block=context_block,
+        )
+
+        # Call OpenAI
+        logger.info("Calling OpenAI for profile '%s'", profile_name)
+        response = self.client.send_request(body=run_params)
+
+        # Parse agent + actions
+        agent_obj = AIResponseParser.extract_agent(response)
+        if not agent_obj:
+            logger.error("Model did not return a valid 'agent' object. Aborting.")
+            return RunResult(success=False, retry_requested=False)
+
+        actions = agent_obj.get("actions", [])
+        if not isinstance(actions, list) or not actions:
+            logger.warning("No actions returned by the model.")
+            return RunResult(success=False, retry_requested=False)
+
+        # Per-run allowed_actions (from config)
+        effective_allowed: Optional[List[str]] = None
+        if run_item and run_item.allowed_actions:
+            registered = set(ActionRegistry.allowed_types())
+            effective_allowed = [
+                t for t in run_item.allowed_actions if t in registered
+            ]
+            if not effective_allowed:
+                logger.warning(
+                    "Run has 'allowed_actions' but none match registered actions; "
+                    "all actions from the model will be rejected."
+                )
+
+        if effective_allowed:
+            filtered_actions = [
+                a for a in actions if a.get("type") in effective_allowed
+            ]
+        else:
+            # No per-run restriction: accept anything the registry knows
+            filtered_actions = [
+                a for a in actions if a.get("type") in ActionRegistry.allowed_types()
+            ]
+
+        if not filtered_actions:
+            logger.warning(
+                "No actions left after allowed_actions / registry filtering. "
+                "Original actions: %r",
+                actions,
+            )
+            return RunResult(success=False, retry_requested=False)
+
+        # Special case: a single 'continue' action means "no final side effects yet"
+        if len(filtered_actions) == 1 and filtered_actions[0].get("type") == "continue":
+            logger.info(
+                "Agent returned only a 'continue' action; "
+                "no side effects will be executed for this attempt."
+            )
+            return RunResult(success=False, retry_requested=False)
+
+        # Execute actions
+        runtime_ctx = ActionRuntimeContext(
+            project_root=self.project_root,
+            file_writer=self.file_writer,
+            git_manager=self.git_manager,
+            repo_config=self.repo_config,
+            logger=logger,
+            target_file=run_item.target_file,
+        )
+
+        execute_actions(filtered_actions, runtime_ctx)
+        logger.info("All actions executed.")
+
+        if runtime_ctx.retry_requested:
+            logger.info(
+                "Run requested retry. Reason: %s",
+                runtime_ctx.retry_reason or "<no reason>",
+            )
+            return RunResult(
+                success=False,
+                retry_requested=True,
+                retry_reason=runtime_ctx.retry_reason,
+            )
+
+        return RunResult(success=True, retry_requested=False)
+
+
+
+================================================================================
+FILE: C:\projects\aiAgency\core\runtime\run_executor.py
+================================================================================
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any, Dict
+
+from core.config.run_config import RunItem
+from core.context.context_loader import load_context_params
+from core.runtime.app_runner import AppRunner, RunResult
+
+
+@dataclass
+class RunExecutionResult:
+    """High-level summary of one RunItem execution (with retries)."""
+
+    success: bool
+    attempts: int
+    retried: bool
+    last_retry_reason: str | None = None
+
+
+class RunExecutor:
+    """Execute a single RunItem with agent-driven retry logic."""
+
+    def __init__(self, project_root: Path) -> None:
+        self.project_root = project_root
+        self.app_runner = AppRunner(project_root=project_root)
+
+    # ------------------------------------------------------------------
+    # Internal helpers
+    # ------------------------------------------------------------------
+
+    def _build_run_params_for_attempt(
+        self,
+        run: RunItem,
+        use_retry_ctx: bool,
+        attempt: int,
+    ) -> Dict[str, Any]:
+        """Load context files, and print which ones are chosen for this attempt."""
+        if use_retry_ctx and run.retry_context_files:
+            context_files = run.retry_context_files
+            ctx_type = "retry_context_files"
+        else:
+            context_files = run.context_file
+            ctx_type = "context_file"
+
+        if not context_files:
+            raise ValueError("Run is missing context_file / retry_context_files.")
+
+        print(f"[RunExecutor] Attempt {attempt} using {ctx_type}: {context_files}")
+
+        params = load_context_params(self.project_root, context_files)
+
+        # Attach the list so AppRunner can also log it
+        params["_context_files_display"] = context_files
+
+        return params
+
+    # ------------------------------------------------------------------
+    # Public API
+    # ------------------------------------------------------------------
+
+    def execute(self, run: RunItem, run_index: int) -> RunExecutionResult:
+        """Execute the given RunItem with agent-controlled retries."""
+        max_extra_retries = max(0, run.retry)
+        retries_used = 0
+        attempt = 1
+        last_retry_reason: str | None = None
+
+        while True:
+            use_retry_ctx = attempt > 1
+            run_params = self._build_run_params_for_attempt(run, use_retry_ctx, attempt)
+
+            agent_input_overrides = dict(run.agent_input or {})
+
+            if run.target_file:
+                agent_input_overrides["target_file"] = run.target_file
+
+            if run.allowed_actions:
+                agent_input_overrides["allowed_actions"] = run.allowed_actions
+
+            try:
+                result: RunResult = self.app_runner.run(
+                    run_item=run,
+                    run_params=run_params,
+                    profile_name=run.profile_name,
+                    class_name=run.class_name,
+                    task_description=run.task_description,
+                    agent_input_overrides=agent_input_overrides,
+                )
+            except Exception as exc:  # noqa: BLE001
+                print(f"[RUN {run_index}] attempt {attempt} crashed with exception: {exc}")
+                return RunExecutionResult(
+                    success=False,
+                    attempts=attempt,
+                    retried=retries_used > 0,
+                    last_retry_reason=last_retry_reason,
+                )
+
+            if result.success:
+                return RunExecutionResult(
+                    success=True,
+                    attempts=attempt,
+                    retried=retries_used > 0,
+                    last_retry_reason=last_retry_reason,
+                )
+
+            # Not successful: see if retry was explicitly requested
+            if not result.retry_requested:
+                print(
+                    f"[RUN {run_index}] attempt {attempt} failed without retry request; "
+                    "stopping this run."
+                )
+                return RunExecutionResult(
+                    success=False,
+                    attempts=attempt,
+                    retried=retries_used > 0,
+                    last_retry_reason=last_retry_reason,
+                )
+
+            # Agent did request a retry
+            last_retry_reason = result.retry_reason
+
+            if retries_used >= max_extra_retries:
+                print(
+                    f"[RUN {run_index}] attempt {attempt} requested retry, "
+                    f"but max retries ({max_extra_retries}) reached; stopping."
+                )
+                return RunExecutionResult(
+                    success=False,
+                    attempts=attempt,
+                    retried=True,
+                    last_retry_reason=last_retry_reason,
+                )
+
+            retries_used += 1
+            next_attempt = attempt + 1
+            print(
+                f"[RUN {run_index}] attempt {attempt} requested retry; "
+                f"starting attempt {next_attempt} (retry {retries_used}/{max_extra_retries})."
+            )
+            attempt = next_attempt
+
+
+
+================================================================================
+FILE: C:\projects\aiAgency\core\runtime\__init__.py
+================================================================================
+
 
 
 
@@ -2208,309 +2867,92 @@ class PathIndexGenerator:
 
 
 ================================================================================
-FILE: C:\projects\aiAgency\profiles\code_generation.json
+FILE: C:\projects\aiAgency\test\calculator.py
 ================================================================================
 
-{
-  "model": "gpt-4.1-mini",
-  "temperature": 0,
-  "response_format": { "type": "json_object" },
-  "messages": [
-    {
-      "role": "system",
-      "content": "You are a code generation agent.\n\nIMPORTANT:\n- The file you are responsible for is: ${target_file}.\n- If the task_description or agent_input mention a different path, IGNORE those and treat ${target_file} as the single source of truth.\n- Always generate code only for ${target_file}.You are an AI code generation agent inside the aiAgency framework.\n\nYou MUST respond with a single JSON object, not text or markdown. The JSON must follow the expected schema with an `agent` key and an `actions` array. Do not include any extra commentary, only valid JSON."
-    },
-    {
-      "role": "user",
-      "content": "Runtime input:\n\n${agent_input}\n\nTASK:\n${task_description}\n"
-    }
-  ]
-}
+# === CONTEXT START ===
+# This module defines a reusable Calculator class with basic arithmetic operations.
+# === CONTEXT END ===
 
+class Calculator:
+    """
+    A simple calculator class to perform basic arithmetic operations.
+    """
 
+    def add(self, a: float, b: float) -> float:
+        """
+        Returns the sum of a and b.
 
-================================================================================
-FILE: C:\projects\aiAgency\profiles\code_refactor.json
-================================================================================
+        :param a: First number to add.
+        :param b: Second number to add.
+        :return: The sum of a and b.
+        """
+        return a + b
 
-{
-  "name": "code_refactor",
-  "model": "gpt-4o",
-  "temperature": 0,
-  "top_p": 1,
-  "max_tokens": 1600,
+    def subtract(self, a: float, b: float) -> float:
+        """
+        Returns the difference of a and b.
 
-  "messages": [
-    {
-      "role": "system",
-      "content": "You are a senior software engineer whose job is to refactor an existing Python file.\n\nYou will receive:\n- A JSON object called \"agent_input\" which contains:\n  - profile_name\n  - class_name (the logical path of the file being worked on)\n  - refactor_class (the concrete path of the file to refactor, if set)\n  - refactor.original_code (the full current source code of the file, if available)\n- A natural-language refactoring request from the user.\n\nYour task: produce a new version of that file and describe it as an \"agent\" object with actions.\n\nYou MUST respond with a single JSON object of the form:\n{\n  \"agent\": {\n    \"name\": \"code_refactor\",\n    \"version\": \"1.0\",\n    \"actions\": [\n      {\n        \"type\": \"generate_class_file\",\n        \"params\": {\n          \"target_path\": <string>,\n          \"code\": <string>,\n          \"context\": <string>\n        }\n      }\n    ]\n  }\n}\n\nRules:\n- \"target_path\" MUST be the path of the file being refactored.\n  - Prefer agent_input.refactor_class if it is non-null.\n  - Otherwise use agent_input.class_name.\n- \"code\" must contain the FULL updated Python source code of that file (not just a diff).\n- \"context\" must briefly explain what you changed and why.\n\nIf agent_input.refactor.original_code is empty, assume the file exists but could not be loaded; in that case, still generate a complete file using the description.\n"
-    },
-    {
-      "role": "user",
-      "content": "Runtime input for this refactor request, as JSON:\n\n${agent_input}"
-    },
-    {
-      "role": "user",
-      "content": "${task_description}"
-    }
-  ],
+        :param a: Number to subtract from.
+        :param b: Number to subtract.
+        :return: The difference of a and b.
+        """
+        return a - b
 
-  "response_format": { "type": "json_object" },
-  "user": "${default_user}"
-}
+    def multiply(self, a: float, b: float) -> float:
+        """
+        Returns the product of a and b.
 
+        :param a: First number to multiply.
+        :param b: Second number to multiply.
+        :return: The product of a and b.
+        """
+        return a * b
 
+    def divide(self, a: float, b: float) -> float:
+        """
+        Returns the quotient of a and b. Raises a ValueError if b is zero.
 
-================================================================================
-FILE: C:\projects\aiAgency\profiles\framework_action_generator.json
-================================================================================
-
-{
-  "name": "framework_action_generator",
-  "model": "gpt-4o",
-  "temperature": 0,
-  "top_p": 1,
-  "max_tokens": 1600,
-
-  "task_description": "Generate a new action class module under core/actions/generate_test_file.py.\n\nRequirements:\n- Define class GenerateTestFileAction(BaseAction) with action_type = \"generate_test_file\".\n- Expected params in self.params:\n  {\n    \"target_path\": string,   // e.g. \"tests/test_calculator.py\"\n    \"code\": string,          // full test source code\n    \"context\": string        // explanation of what is being tested\n  }\n\nvalidate(self):\n- Return True only if target_path is a non-empty string and code is a non-empty string.\n\nexecute(self, ctx):\n- Resolve target_path relative to ctx.project_root via pathlib.Path.\n- Ensure parent directory exists (mkdir(parents=True, exist_ok=True)).\n- Use ctx.class_generator to write the file with a CONTEXT header:\n  - Temporarily set class_generator.base_path to the parent directory of target_path.\n  - Call generate_with_comments(filename=<basename>, content=code, comments=context).\n  - Restore original base_path.\n- Log an info message with the absolute path of the generated test file.\n\nRegistration:\n- At the bottom of the module, import ActionRegistry and register the action:\n  from .registry import ActionRegistry\n  ActionRegistry.register(GenerateTestFileAction)\n\nCoding style:\n- Type annotate validate/execute methods.\n- Use clear variable names and logging messages.\n- No unused imports.\n\nRefactor logic for existing action modules:\n- If agent_input.refactor.original_code is provided for an existing action module (e.g. you are updating GenerateTestFileAction rather than creating it from scratch):\n  - Preserve the public contract: action_type value, ActionRegistry.register(...) call, and expected params structure.\n  - You MAY improve implementation details, logging, validation, or comments.\n  - Do NOT change the meaning of existing parameters or the overall behaviour of the action.\n  - The goal is to refine the action, not to break callers.",
-
-  "messages": [
-    {
-      "role": "system",
-      "content": "You are a senior Python engineer working on an AI-driven code-generation framework called aiAgency.\nYour task is to produce COMPLETE, standalone Python modules for internal framework actions, using an action-based response format.\n\nYou MUST ALWAYS respond with a single JSON object containing an 'agent' key and NOTHING else. No markdown, no prose, no backticks.\n\nThe response MUST have the form:\n{\n  \"agent\": {\n    \"name\": string,\n    \"version\": string,\n    \"actions\": [ action, ... ]\n  }\n}\n\nEach action is an object with:\n- \"type\": string\n- \"params\": object\n\nFor THIS profile you are allowed to use ONLY ONE action type:\n\n1) \"generate_class_file\"\n   params:\n   {\n     \"target_path\": string,          // path relative to repository root, e.g. \"core/actions/generate_test_file.py\"\n     \"code\": string,                 // full Python module source code for the action\n     \"context\": string               // short explanation of responsibilities and key design decisions\n   }\n\nBehaviour:\n- When creating a NEW action module:\n  - Use 'agent_input.class_name' as the default target_path if it is present (e.g. \"core/actions/generate_test_file.py\").\n  - Generate a complete, standalone Python module that subclasses BaseAction, sets action_type, implements validate/execute, and registers itself via ActionRegistry.register(...).\n\n- When REFACTORING an existing action module (agent_input.refactor.original_code is present):\n  - Treat it as an update of the existing module.\n  - Preserve the public contract: action_type value, registration call, and expected params structure.\n  - You MAY improve implementation, logging, validation, and internal structure following the user instructions.\n  - Do NOT break existing callers.\n\nDecision rules:\n- For this profile, you MUST return AT LEAST ONE 'generate_class_file' action containing the full module code.\n- The 'actions' array MUST NOT be empty.\n- Do NOT invent any other action types for this profile.\n\nOutput rules:\n- Do NOT invent new action types.\n- Do NOT output markdown.\n- Do NOT wrap the JSON in backticks.\n- Do NOT include any text outside the single JSON object.\n\nExample shape (illustrative only):\n{\n  \"agent\": {\n    \"name\": \"FrameworkActionGenerator\",\n    \"version\": \"1.0\",\n    \"actions\": [\n      {\n        \"type\": \"generate_class_file\",\n        \"params\": {\n          \"target_path\": \"core/actions/generate_test_file.py\",\n          \"code\": \"<full Python module>\",\n          \"context\": \"Action that generates test files based on provided code and target path.\"\n        }\n      }\n    ]\n  }\n}"
-    },
-    {
-      "role": "user",
-      "content": "Runtime input for this request, as JSON:\n\n${agent_input}\n\nUse 'agent_input' to decide whether you are creating a new module (no refactor.original_code) or updating an existing one (refactor.original_code present)."
-    },
-    {
-      "role": "user",
-      "content": "${task_description}"
-    }
-  ],
-
-  "response_format": { "type": "json_object" },
-  "user": "${default_user}"
-}
+        :param a: Numerator.
+        :param b: Denominator.
+        :return: The quotient of a and b.
+        :raises ValueError: If b is zero.
+        """
+        if b == 0:
+            raise ValueError("Cannot divide by zero.")
+        return a / b
 
 
 
 ================================================================================
-FILE: C:\projects\aiAgency\profiles\project_manifest_generator.json
+FILE: C:\projects\aiAgency\test\retry_demo_calculator.py
 ================================================================================
 
-{
-  "name": "project_manifest_generator",
-  "model": "gpt-4o",
-  "temperature": 0,
-  "top_p": 1,
-  "max_tokens": 3000,
+# === CONTEXT START ===
+# This module implements a simple calculator with basic arithmetic operations.
+# It includes methods for addition, subtraction, multiplication, and division.
+# The division method handles division by zero by raising a ValueError.
+# === CONTEXT END ===
 
-  "task_description": "Act as a project manifest designer for the aiAgency framework.\n\nYour job is to convert a high-level project description (for example: \"Design me a microservice with multiple modules\", \"Build a CLI tool\", \"Create a game engine\", etc.) into a concrete **Project Manifest** JSON file.\n\nThe output of this profile is NOT source code and NOT runs.json. It is a **single JSON object** with a fixed schema describing the entire project: modules, classes, fields, methods, and tests, including rich semantic context so that another AI can implement the code purely from this manifest.\n\nPROJECT MANIFEST SCHEMA (MANDATORY)\nThe top-level object MUST be:\n{\n  \"project_name\": string,\n  \"description\": string,\n  \"language\": string,\n  \"root_path\": string,\n  \"modules\": [\n    {\n      \"module_name\": string,\n      \"description\": string,\n      \"classes\": [\n        {\n          \"class_name\": string,\n          \"file_path\": string,\n          \"description\": string,\n          \"fields\": [\n            {\n              \"name\": string,\n              \"type\": string,\n              \"description\": string\n            }\n          ],\n          \"methods\": [\n            {\n              \"name\": string,\n              \"description\": string,\n              \"parameters\": [\n                {\n                  \"name\": string,\n                  \"type\": string,\n                  \"description\": string\n                }\n              ],\n              \"returns\": string\n            }\n          ]\n        }\n      ]\n    }\n  ],\n  \"tests\": [\n    {\n      \"target_class\": string,\n      \"file_path\": string,\n      \"description\": string\n    }\n  ]\n}\n\nSTRUCTURAL REQUIREMENTS\n- All keys above MUST exist at the top level.\n- Arrays (modules, classes, fields, methods, tests) MAY be empty where reasonable, but MUST still be present.\n- All strings MUST use double quotes.\n- No comments or trailing commas.\n- You MUST NOT add extra top-level keys.\n- You MUST NEVER use a \"params\" object for methods. You MUST ALWAYS use a \"parameters\" array of parameter objects.\n\nSEMANTIC CONTEXT REQUIREMENTS (CRITICAL)\nYour manifest MUST provide enough information for a code generator to implement the project **without guessing the architecture**.\n\n1) PROJECT LEVEL\n- \"project_name\": short, descriptive.\n- \"description\": 3–8 sentences explaining:\n  - Overall purpose and main features.\n  - External environment (CLI, HTTP API, game loop, batch job, etc.).\n  - Main subsystems (high-level list of modules/classes).\n  - Key data flows and control flows between subsystems.\n\n2) MODULE LEVEL\n- \"module_name\": import-style name (e.g. \"app.core\", \"service.api\", \"engine.renderer\").\n- \"description\": 4–8 sentences describing:\n  - Responsibility of this module.\n  - Which classes it contains and what roles they play.\n  - Which other modules it depends on or calls.\n  - Typical scenarios in which this module is used.\n- Descriptions MUST be concrete (no vague \"handles logic\" type descriptions).\n\n3) CLASS LEVEL\n- \"class_name\": clear, coherent name that reflects responsibility.\n- \"file_path\": exact source file path relative to repo root (e.g. \"app/core/service.py\", \"src/api/client.ts\").\n- \"description\": 5–10 sentences describing the semantic contract of the class:\n  - What the class represents.\n  - Its main responsibilities.\n  - What invariants it maintains.\n  - Which other classes it collaborates with and how.\n  - Typical lifecycle / usage pattern (who creates it, which public methods are called in which sequence).\n  - Any important error-handling or state-transition rules.\n\n4) FIELD LEVEL\n- Each field MUST contain:\n  - \"name\": field/attribute name.\n  - \"type\": type string (e.g. \"int\", \"str\", \"float\", \"Board\", \"List[Task]\", etc., depending on language).\n  - \"description\": at least 2 sentences describing what is stored, how it affects behaviour, and any constraints (ranges, units, etc.).\n\n5) METHOD LEVEL\n- Each method MUST contain:\n  - \"name\": method name.\n  - \"description\": 4–8 sentences describing:\n    - What the method does in domain terms.\n    - When and by whom it is called.\n    - How it interacts with fields and other classes.\n    - Important branches/conditions and side effects.\n    - Failure modes, preconditions, or important edge cases.\n  - \"parameters\": list of parameter objects; MAY be empty, but MUST be present.\n  - \"returns\": return type string (or \"None\" / \"void\" where appropriate).\n\n6) PARAMETER LEVEL\n- Each parameter MUST contain:\n  - \"name\": parameter name.\n  - \"type\": type string.\n  - \"description\": 1–3 sentences describing its meaning, valid values, and how it influences behaviour.\n\n7) TEST LEVEL\n- Each test spec MUST contain:\n  - \"target_class\": the class name or fully-qualified class name being tested.\n  - \"file_path\": test file path (e.g. \"tests/test_board.py\", \"tests/unit/test_service.py\").\n  - \"description\": 3–6 sentences describing behavioural aspects and invariants being tested, key scenarios, and edge cases.\n- You MUST include at least one test entry for each central/critical class.\n\nLANGUAGE & ROOT PATH RULES\n- If agent_input.language is provided, set \"language\" to that value (e.g. \"python\", \"typescript\", \"java\").\n- Otherwise default to \"python\".\n- If agent_input.root_path is provided, use it for \"root_path\".\n- Otherwise choose a concise, sensible default based on the project goal (e.g. \"app\", \"service\", \"engine\", \"project\").\n\nFILE PATH RULES\n- Every class MUST have a non-empty \"file_path\".\n- If the user does not provide specific file paths, derive them consistently from root_path and module_name (for example, for language \"python\": root_path + \"/\" + last segment of module_name + \".py\").\n\nCOHERENCE & INTERACTIONS (VERY IMPORTANT)\n- The manifest MUST describe a coherent, interconnected architecture.\n- Whenever a method is described as using another class or method, that class/method MUST exist in the manifest with matching names.\n- Import relationships implied by \"file_path\" and \"module_name\" MUST be realistic for the chosen language.\n- Avoid contradictions between descriptions and types.\n\nVALIDATION BEFORE OUTPUT (MANDATORY)\nBefore producing the final JSON manifest, you MUST validate internally that:\n- All modules contain module_name, description, and classes[].\n- All classes contain class_name, file_path, description, fields[], and methods[].\n- All methods contain name, description, parameters[], and returns.\n- No method uses any key named \"params\"; ONLY \"parameters\" is allowed.\n- All fields contain name, type, and description, and field descriptions are at least 2 sentences.\n- All descriptions (project, modules, classes, methods, tests) meet the required sentence-length rules stated above.\n- All tests contain target_class, file_path, and description.\n\nIf this validation fails, you MUST correct and regenerate the manifest content until it satisfies all rules before returning it.\n\nOUTPUT TARGET (PATH)\n- If agent_input.target_manifest_path is provided, you MUST set the output file path to that.\n- Otherwise, you MUST default to:\n  \"project_manifest.json\"\n\nBEHAVIOUR SUMMARY\n- You are NOT generating source code.\n- You are NOT generating runs.json.\n- You generate ONE project manifest JSON object that:\n  - Strictly follows the schema.\n  - Provides rich semantic context as described above.\n\nYour final output MUST be wrapped as one action of type \"generate_profile_file\" following the envelope specified in the system message.",
+class Calculator:
+    """A simple calculator class to perform basic arithmetic operations."""
 
-  "messages": [
-    {
-      "role": "system",
-      "content": "You are an AI Project Manifest Designer inside aiAgency.\n\nOUTPUT RULES:\n- ALWAYS respond with a single JSON object containing an 'agent' key.\n- No markdown. No prose. No backticks.\n\nFORMAT:\n{\n  \"agent\": {\n    \"name\": string,\n    \"version\": string,\n    \"actions\": [ action, ... ]\n  }\n}\n\nEach action is an object with:\n- \"type\": string\n- \"params\": object\n\nALLOWED ACTION TYPE:\n1) \"generate_profile_file\"\n   params = {\n     \"target_path\": string,\n     \"content\": string,\n     \"context\": string\n   }\n\nBEHAVIOUR:\n- Generate ONLY the project manifest JSON.\n- 'content' MUST contain a single valid JSON object following the schema and semantic rules in task_description.\n- No trailing commas, no comments.\n- No text outside the JSON envelope.\n\nINTERPRETATION RULES:\n- Read agent_input.goal, agent_input.language, agent_input.root_path, agent_input.target_manifest_path.\n- Derive a coherent architecture: modules, classes, fields, methods and tests, with detailed descriptions and interaction explanations.\n\nTARGET PATH RULES:\n- If agent_input.target_manifest_path is provided, use it as params.target_path.\n- Otherwise, use \"project_manifest.json\" as params.target_path.\n\nDECISION RULES:\n- You MUST return at least one 'generate_profile_file' action containing the full manifest JSON text in 'content'.\n- The 'actions' array MUST NOT be empty.\n- You MUST NOT invent new action types.\n- You MUST NOT output anything outside the envelope."
-    },
-    {
-      "role": "user",
-      "content": "Runtime input JSON:\n${agent_input}\nUse this to design the manifest. Follow the schema and provide RICH descriptions and interaction details as specified in the task_description."
-    },
-    {
-      "role": "user",
-      "content": "${task_description}"
-    }
-  ],
+    def add(self, a: float, b: float) -> float:
+        """Return the sum of a and b."""
+        return a + b
 
-  "response_format": { "type": "json_object" },
-  "user": "${default_user}"
-}
+    def subtract(self, a: float, b: float) -> float:
+        """Return the difference of a and b."""
+        return a - b
 
+    def multiply(self, a: float, b: float) -> float:
+        """Return the product of a and b."""
+        return a * b
 
-
-================================================================================
-FILE: C:\projects\aiAgency\profiles\project_planner.json
-================================================================================
-
-{
-  "name": "project_planner",
-  "model": "gpt-4o",
-  "temperature": 0,
-  "top_p": 1,
-  "max_tokens": 3000,
-
-  "task_description": "Act as a project planner for the aiAgency framework.\n\nYour job is to convert a high-level project description (for example: \"Design me a Tetris game with all necessary classes and modules\") into a concrete aiAgency run configuration file (runs.json).\n\nThe output of this profile is NOT Python code, but a JSON configuration file with a top-level 'runs' array. Each element in 'runs' is a single step that aiAgency will execute using an existing profile.\n\nFor THIS planner, you MUST:\n- Use ONLY the 'code_generation' profile in every run step.\n- Create run steps ONLY for modules/classes (no tests, no refactor runs, no other actions).\n\nYou must:\n- Decompose the requested project into coherent components (modules/classes).\n- For each component, create a run using the 'code_generation' profile.\n- Order the steps logically so that foundational modules are generated before higher-level orchestration modules.\n- Produce a single JSON object of the form { \"runs\": [ ... ] }.\n- The JSON must be valid, with no comments, no trailing commas, and double-quoted keys/strings.\n\nPROJECT_STRUCTURE REQUIREMENT (CRITICAL):\n- From the high-level project goal, derive a single multiline text description called PROJECT_STRUCTURE.\n- PROJECT_STRUCTURE MUST describe the ENTIRE project, not just a single file.\n- PROJECT_STRUCTURE MUST be CONCRETE but COMPACT.\n- It MUST include, for the whole project (using short bullets/lines):\n  - The list of all modules with file paths (for the Tetris game, this MUST include at least: \"tetris/config.py\", \"tetris/tetromino.py\", \"tetris/board.py\", \"tetris/renderer.py\", \"tetris/input_handler.py\", \"tetris/game_loop.py\", and the entrypoint \"tetris/main.py\").\n  - For each module: the main classes and/or functions it defines.\n  - For each class: key public attributes/fields and method names, with parameter lists where relevant (e.g. GameLoop.start(self), InputHandler.get_input(self) -> str | None).\n  - How modules/classes depend on and call each other (e.g. \"GameLoop uses Board.remove_full_lines() and Renderer.render(board)\").\n- ENTRYPOINT LOCATION (TETRIS-SPECIFIC):\n  - When the goal describes a Tetris game (as in this use case), the entrypoint MUST be located at \"tetris/main.py\" inside the tetris package.\n  - You MUST NOT create or modify any root-level \"main.py\" file at the repository root.\n  - The file \"tetris/main.py\" MUST:\n    - Define a main() function.\n    - Import GameLoop from \"tetris/game_loop.py\" using the correct import path.\n    - Instantiate GameLoop() (with the constructor signature defined in PROJECT_STRUCTURE).\n    - Call game.start() (or equivalent loop method defined in PROJECT_STRUCTURE).\n- PROJECT_STRUCTURE MUST form a coherent API contract: other modules MUST be able to compile/run against these class and method signatures.\n- Vague descriptions like \"this module handles game settings\" WITHOUT listing class, attributes, and method names are NOT sufficient.\n- PROJECT_STRUCTURE MUST be constructed ONCE for the whole project and then reused as a CONSTANT string.\n\nTASK_DESCRIPTION FORMAT (MANDATORY):\nFor EVERY run object you output in 'runs', you MUST construct 'task_description' with THREE parts in this exact order:\n\n1) FILE_SPECIFIC_INSTRUCTION\n   - A short, file-specific instruction (1–3 sentences) describing what to generate for that file.\n   - Example: \"Implement the GameLoop class in tetris/game_loop.py. It should control the main game loop and be runnable via GameLoop().start().\"\n\n2) IMPLEMENTATION RULES (MANDATORY)\n   - Immediately after FILE_SPECIFIC_INSTRUCTION, add two newline characters (\\n\\n) and then paste the following block EXACTLY, with no changes:\n\n   IMPLEMENTATION RULES (MANDATORY)\n   - Below there is a section titled PROJECT_STRUCTURE.\n   - PROJECT_STRUCTURE defines the entire project architecture: modules, classes, methods, attributes, and their relationships.\n   - Treat PROJECT_STRUCTURE as the SINGLE SOURCE OF TRUTH for the architecture.\n   - You MUST:\n     - Implement ONLY the classes/functions that PROJECT_STRUCTURE assigns to THIS file (this module path).\n     - Use EXACT class names, method names, and attribute names from PROJECT_STRUCTURE.\n     - Use EXACT method parameter lists from PROJECT_STRUCTURE.\n     - Import external classes/functions using the EXACT module paths and names in PROJECT_STRUCTURE.\n     - When you need to use another class, ALWAYS import it instead of redefining it.\n   - You MUST NOT:\n     - Invent new public class names, method names, or modules that are not mentioned in PROJECT_STRUCTURE.\n     - Move classes to different modules than specified.\n     - Change method signatures (names or parameters) defined in PROJECT_STRUCTURE.\n   - If the file-specific instruction above conflicts with PROJECT_STRUCTURE, PROJECT_STRUCTURE WINS.\n   - Output ONLY valid Python code for THIS file (no comments about other files, no extra text around the code).\n\n3) PROJECT_STRUCTURE\n   - After the IMPLEMENTATION RULES block, add two newline characters (\\n\\n) and then the literal header line:\n     PROJECT_STRUCTURE\n   - On the following lines, paste the global PROJECT_STRUCTURE text you derived earlier.\n   - This PROJECT_STRUCTURE text MUST be IDENTICAL for every run (same characters, same whitespace). You MUST NOT specialize, trim, or modify PROJECT_STRUCTURE per file.\n\nYou do NOT execute the plan yourself. Instead, you write a runs.json file that other aiAgency runs will later execute.\n\nThe resulting runs.json MUST:\n- Have top-level key 'runs' mapped to an array.\n- Each run object MUST contain at least 'profile_name', 'class_name', and 'task_description'.\n- You MAY add 'extra_params', where 'extra_params.target_path' SHOULD be equal to 'class_name'.\n- Use ONLY 'code_generation' as 'profile_name' in all run steps.\n\nIf agent_input.refactor.original_code is provided, treat it as the existing runs.json content, and update/extend it according to the new project goal while preserving unrelated steps. If no refactor.original_code is present, create a new runs.json from scratch.",
-
-  "messages": [
-    {
-      "role": "system",
-      "content": "You are an AI Project Planner working inside the aiAgency framework.\n\nYour task is to produce COMPLETE run configuration files (runs.json) that define multi-step pipelines for aiAgency.\n\nOUTPUT FORMAT (MANDATORY):\nYou MUST ALWAYS respond with a single JSON object containing an 'agent' key and NOTHING else. No markdown, no prose, no backticks.\n\nThe response MUST have the form:\n{\n  \"agent\": {\n    \"name\": string,\n    \"version\": string,\n    \"actions\": [ action, ... ]\n  }\n}\n\nEach action is an object with:\n- \"type\": string\n- \"params\": object\n\nFor THIS profile you are allowed to use ONLY ONE action type:\n\n1) \"generate_profile_file\"\n   params:\n   {\n     \"target_path\": string,\n     \"content\": string,\n     \"context\": string\n   }\n\nBEHAVIOUR:\n- You are NOT generating Python modules here. You are generating a run configuration file that other profiles will use.\n- The 'content' string must be valid JSON representing a single object with top-level key 'runs'.\n- Do NOT include comments, trailing commas, or any non-JSON syntax inside 'content'.\n- Do NOT emit markdown or any text outside the single JSON object with the 'agent' key.\n\nPROJECT_STRUCTURE REQUIREMENT (CRITICAL):\n- At the beginning of planning, derive a single shared project structure description based on agent_input.goal (or equivalent). Treat this as a conceptual multiline string called PROJECT_STRUCTURE.\n- PROJECT_STRUCTURE MUST describe the ENTIRE project, not just a single file. It MUST be a concrete description of all relevant modules and classes, their public APIs, how they interact, and where the entrypoint lives.\n- For the Tetris game scenario, PROJECT_STRUCTURE MUST explicitly list the \"tetris/\" modules including the entrypoint at \"tetris/main.py\".\n- PROJECT_STRUCTURE MUST be built ONCE and then reused as a CONSTANT string for all runs.\n\nTASK_DESCRIPTION FORMAT (MANDATORY):\n- For EVERY run object you output in 'runs', you MUST construct 'task_description' as:\n  1) FILE_SPECIFIC_INSTRUCTION (1–3 sentences for THIS file only).\n  2) Two newline characters (\\n\\n).\n  3) The IMPLEMENTATION RULES (MANDATORY) block, pasted EXACTLY as specified in the profile task_description.\n  4) Two newline characters (\\n\\n).\n  5) The literal line: PROJECT_STRUCTURE\n  6) A newline, then the full PROJECT_STRUCTURE text.\n- The IMPLEMENTATION RULES block and PROJECT_STRUCTURE MUST be IDENTICAL across all runs.\n\nPLANNING RULES:\n- Read agent_input to understand the project goal.\n- For the Tetris game, decompose the project into modules/classes under the \"tetris/\" package (e.g. \"tetris/config.py\", \"tetris/tetromino.py\", \"tetris/board.py\", \"tetris/renderer.py\", \"tetris/input_handler.py\", \"tetris/game_loop.py\", and \"tetris/main.py\" as entrypoint).\n- You MUST NOT create or modify any files outside the \"tetris/\" directory when planning the Tetris game; in particular, do NOT target a root-level \"main.py\".\n- For EACH module or class file you decide to create, you MUST create a run step that:\n  - Uses \"profile_name\": \"code_generation\".\n  - Sets \"class_name\" to the intended file path (e.g. \"tetris/board.py\" or \"tetris/main.py\").\n  - Sets \"task_description\" according to the TASK_DESCRIPTION FORMAT (MANDATORY).\n  - Optionally sets \"extra_params.target_path\" equal to \"class_name\".\n- You MUST NOT use any other profile names in 'profile_name' besides \"code_generation\" when building 'runs'.\n- Do NOT create test files, refactor steps, or any other auxiliary actions in this planner. Only class/module generation runs are allowed.\n\nNEW vs REFACTOR MODE:\n- If agent_input.refactor.original_code is NOT provided:\n  - You are creating a brand new runs.json file from scratch.\n  - Choose a sensible default target_path for the run configuration (for example, use agent_input.target_runs_path if present, otherwise something like \"configs/project_runs.json\").\n- If agent_input.refactor.original_code IS provided:\n  - Treat it as the existing content of an existing runs.json.\n  - Preserve unrelated runs.\n  - Add, modify, or remove runs only as necessary to satisfy the new project goal.\n  - The final 'content' must still be a complete JSON object with top-level 'runs'.\n\nDECISION RULES:\n- For this profile, you MUST return AT LEAST ONE 'generate_profile_file' action containing the full runs.json text in 'content'.\n- The 'actions' array MUST NOT be empty.\n- Do NOT invent new action types.\n- Do NOT output markdown.\n- Do NOT wrap the JSON in backticks.\n- Do NOT include any text outside the single JSON object."
-    },
-    {
-      "role": "user",
-      "content": "Runtime input for this request, as JSON:\n\n${agent_input}\n\nUse 'agent_input' to decide whether you are creating a new runs.json (no refactor.original_code) or updating an existing one (refactor.original_code present). Use fields such as 'goal', 'target_runs_path', or similar if present to choose the filename and structure of the plan."
-    },
-    {
-      "role": "user",
-      "content": "${task_description}"
-    }
-  ],
-
-  "response_format": { "type": "json_object" },
-  "user": "${default_user}"
-}
-
-
-
-================================================================================
-FILE: C:\projects\aiAgency\profiles\security_scan.json
-================================================================================
-
-{
-  "name": "security_scan",
-  "model": "gpt-4o",
-  "temperature": 0,
-  "top_p": 1,
-  "max_tokens": 1600,
-
-  "task_description": "Security scan of a single Python file. Decide whether to allow the run to continue or to abort based on detected vulnerabilities.",
-
-  "messages": [
-    {
-      "role": "system",
-      "content": "You are a senior Python security engineer working inside an AI-driven code-generation framework called aiAgency.\n\nYour ONLY job in this profile is to review given Python source code for security risks and then output a single control-flow action of type \"continue\" that either:\n- continues the run (no-op), or\n- breaks the run (by setting should_break = true).\n\nYou MUST ALWAYS respond with a single JSON object containing an 'agent' key and NOTHING else. No markdown, no prose, no backticks.\n\nThe response MUST have the form:\n{\n  \"agent\": {\n    \"name\": string,\n    \"version\": string,\n    \"actions\": [ action, ... ]\n  }\n}\n\nEach action is an object with:\n- \"type\": string\n- \"params\": object\n\nAllowed action types for THIS profile:\n\n1) \"continue\"\n   params:\n   {\n     \"should_break\": bool,    // if true, abort the run by raising RuntimeError\n     \"reason\": string | null  // short human-readable reason\n   }\n\nBehaviour:\n- You will receive a JSON object called 'agent_input'. When this profile is used for a security check, the code to inspect will be provided in agent_input.refactor.original_code (a single string containing the full Python file).\n- If agent_input.refactor.original_code is missing or empty, assume you cannot perform a meaningful security review and set should_break = true with an appropriate reason.\n\nSecurity review guidelines (non-exhaustive):\n- Look for obviously dangerous patterns, for example:\n  - use of eval/exec on untrusted data\n  - os.system / subprocess with shell=True and unvalidated inputs\n  - hard-coded secrets, tokens, or passwords\n  - arbitrary file writes/reads with unvalidated paths in externally reachable code\n  - insecure deserialization (e.g. pickle.loads on untrusted data)\n  - SQL built via string concatenation with untrusted values\n- Consider severity:\n  - Only set should_break = false if you see no significant vulnerabilities or only low-risk issues in this specific context.\n  - If you see high- or medium-risk issues, set should_break = true.\n\nDecision rules:\n- You MUST return AT LEAST ONE action.\n- The 'actions' array MUST NOT be empty.\n- You MUST NOT create any action types other than \"continue\" for this profile.\n\nOutput rules:\n- Do NOT output markdown.\n- Do NOT wrap the JSON in backticks.\n- Do NOT include any text outside the single JSON object."
-    },
-    {
-      "role": "user",
-      "content": "Runtime input for this security check, as JSON:\n\n${agent_input}\n\nThe Python file content to review (if available) is in agent_input.refactor.original_code. Base your decision ONLY on that code and the info in agent_input."
-    },
-    {
-      "role": "user",
-      "content": "${task_description}"
-    }
-  ],
-
-  "response_format": { "type": "json_object" },
-  "user": "${default_user}"
-}
-
-
-
-================================================================================
-FILE: C:\projects\aiAgency\project\project_manifest_tetris.json
-================================================================================
-
-{ "project_name": "Tetris Game", "description": "A terminal-based Tetris game implemented in Python using the aiAgency framework.", "language": "Python", "root_path": "./tetris_game", "modules": [ { "name": "config", "description": "Handles game configuration settings.", "classes": [ { "name": "GameConfig", "description": "Stores configuration settings for the Tetris game.", "fields": [ { "name": "board_width", "type": "int", "description": "Width of the game board." }, { "name": "board_height", "type": "int", "description": "Height of the game board." }, { "name": "tick_rate", "type": "float", "description": "Game loop tick rate in seconds." } ], "methods": [ { "name": "load_from_file", "description": "Loads configuration settings from a file.", "params": { "file_path": "str" }, "return_type": "None" } ] } ] }, { "name": "tetromino", "description": "Represents Tetris pieces and their behaviors.", "classes": [ { "name": "Tetromino", "description": "Represents a Tetris piece.", "fields": [ { "name": "shape", "type": "List[List[int]]", "description": "Matrix representation of the tetromino shape." }, { "name": "position", "type": "Tuple[int, int]", "description": "Current position of the tetromino on the board." } ], "methods": [ { "name": "rotate", "description": "Rotates the tetromino shape.", "params": { "direction": "str" }, "return_type": "None" } ] } ] }, { "name": "board", "description": "Manages the game board state.", "classes": [ { "name": "GameBoard", "description": "Represents the Tetris game board.", "fields": [ { "name": "grid", "type": "List[List[int]]", "description": "2D grid representing the board state." } ], "methods": [ { "name": "clear_lines", "description": "Clears completed lines from the board.", "params": {}, "return_type": "int" } ] } ] }, { "name": "render", "description": "Handles rendering of the game state.", "classes": [ { "name": "Renderer", "description": "Renders the game board and tetrominos.", "fields": [], "methods": [ { "name": "render_board", "description": "Renders the current state of the game board.", "params": { "board": "GameBoard" }, "return_type": "None" } ] } ] }, { "name": "input", "description": "Handles user input.", "classes": [ { "name": "InputHandler", "description": "Processes user input for game control.", "fields": [], "methods": [ { "name": "get_input", "description": "Gets user input for controlling the game.", "params": {}, "return_type": "str" } ] } ] }, { "name": "game_loop", "description": "Controls the main game loop.", "classes": [ { "name": "GameLoop", "description": "Manages the game loop and state transitions.", "fields": [ { "name": "is_running", "type": "bool", "description": "Indicates if the game loop is running." } ], "methods": [ { "name": "start", "description": "Starts the game loop.", "params": {}, "return_type": "None" } ] } ] } ], "tests": [ { "name": "test_tetromino_rotation", "description": "Tests the rotation functionality of tetrominos.", "module": "tetromino", "class": "Tetromino", "method": "rotate" }, { "name": "test_line_clearing", "description": "Tests the line clearing functionality of the game board.", "module": "board", "class": "GameBoard", "method": "clear_lines" } ] }
-
-
-================================================================================
-FILE: C:\projects\aiAgency\rules\generic_rules.json
-================================================================================
-
-{
-  "agent_rules": [
-    {
-      "id": "clarity_01",
-      "rule": "Act only on information that is clearly understood.",
-      "intent": "Prevent incorrect actions caused by ambiguity.",
-      "constraints": [],
-      "notes": ""
-    },
-    {
-      "id": "clarity_02",
-      "rule": "Seek clarification only when a task cannot be completed without it.",
-      "intent": "Maintain efficiency while avoiding invalid assumptions.",
-      "constraints": [],
-      "notes": ""
-    },
-    {
-      "id": "goal_01",
-      "rule": "Align all actions strictly with the provided goal.",
-      "intent": "Ensure the agent remains purpose-driven.",
-      "constraints": [],
-      "notes": ""
-    },
-    {
-      "id": "goal_02",
-      "rule": "Avoid actions that do not contribute to the stated objective.",
-      "intent": "Reduce noise and irrelevant behavior.",
-      "constraints": [],
-      "notes": ""
-    },
-    {
-      "id": "consistency_01",
-      "rule": "Ensure responses are stable and internally consistent.",
-      "intent": "Maintain reliability and predictability.",
-      "constraints": [],
-      "notes": ""
-    },
-    {
-      "id": "precision_01",
-      "rule": "Provide information accurately and avoid unsupported assumptions.",
-      "intent": "Preserve trust and correctness.",
-      "constraints": [],
-      "notes": ""
-    },
-    {
-      "id": "restraint_01",
-      "rule": "Operate strictly within the boundaries of the request.",
-      "intent": "Prevent overreach and unnecessary expansion.",
-      "constraints": [],
-      "notes": ""
-    },
-    {
-      "id": "neutrality_01",
-      "rule": "Remain impartial and unbiased in all output.",
-      "intent": "Ensure fairness and neutrality.",
-      "constraints": [],
-      "notes": ""
-    },
-    {
-      "id": "safety_01",
-      "rule": "Avoid actions or information that could cause harm.",
-      "intent": "Prioritize user well-being and system integrity.",
-      "constraints": [],
-      "notes": ""
-    },
-    {
-      "id": "transparency_01",
-      "rule": "Acknowledge limitations when they materially affect output.",
-      "intent": "Promote clarity and trust.",
-      "constraints": [],
-      "notes": ""
-    },
-    {
-      "id": "coherence_01",
-      "rule": "Ensure all parts of the output support a unified meaning.",
-      "intent": "Maintain logical continuity.",
-      "constraints": [],
-      "notes": ""
-    },
-    {
-      "id": "focus_01",
-      "rule": "Concentrate on what is asked and omit irrelevant details.",
-      "intent": "Increase relevance and utility.",
-      "constraints": [],
-      "notes": ""
-    }
-  ]
-}
-
-
-
-================================================================================
-FILE: C:\projects\aiAgency\rules\project_rules.json
-================================================================================
-
-{
-  "project_name": "aiAgency",
-  "rules": [
-    "All source files must be placed under the 'core' or 'app' packages.",
-    "Logging must use the project-wide logger from 'core.logging.logger'.",
-    "Configuration must be read via 'core.config.run_config.RunConfig'.",
-    "Public APIs must not hard-code file system paths; use helpers from 'core.files.path_utils'."
-  ]
-}
+    def divide(self, a: float, b: float) -> float:
+        """Return the division of a by b. Raise ValueError if b is zero."""
+        if b == 0:
+            raise ValueError("Cannot divide by zero.")
+        return a / b
 
 
