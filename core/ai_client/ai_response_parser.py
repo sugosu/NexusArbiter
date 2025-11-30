@@ -5,7 +5,7 @@ from typing import Any, Dict
 
 class AIResponseParser:
     """
-    Extracts structured data (like 'code', 'context', or 'agent') from AI responses.
+    Extracts structured data (like 'agent' and 'actions') from AI responses.
 
     Expected OpenAI response shape (chat/completions):
 
@@ -22,8 +22,8 @@ class AIResponseParser:
     }
 
     When using response_format = { "type": "json_object" }, the content may be:
-    - a JSON string (\"{ ... }\")
-    - or already a dict ( { ... } )
+    - a JSON string ("{ ... }")
+    - or already a dict ({ ... })
     """
 
     # ------------------------------------------------------------------ #
@@ -60,10 +60,12 @@ class AIResponseParser:
         # Case 3: list of parts (future-proofing; try first element)
         if isinstance(content, list) and content:
             first = content[0]
-            # If first is dict and looks like JSON already
+
+            # If first is dict and already looks like the JSON envelope
             if isinstance(first, dict) and "agent" in first:
                 return first
-            # If first has 'text' or 'value' we can try to load
+
+            # If first has 'text' or 'value', try to JSON-load that
             if isinstance(first, dict):
                 text_val = first.get("text") or first.get("value")
                 if isinstance(text_val, str):
@@ -76,36 +78,7 @@ class AIResponseParser:
         return {}
 
     # ------------------------------------------------------------------ #
-    # Legacy code/context helpers
-    # ------------------------------------------------------------------ #
-    @classmethod
-    def extract_code(cls, response: Dict[str, Any]) -> str:
-        data = cls._content_dict(response)
-        val = data.get("code", "")
-        return val if isinstance(val, str) else ""
-
-    @classmethod
-    def extract_context(cls, response: Dict[str, Any]) -> str:
-        data = cls._content_dict(response)
-        val = data.get("context", "")
-        return val if isinstance(val, str) else ""
-
-    @classmethod
-    def extract(cls, response: Dict[str, Any]) -> Dict[str, str]:
-        """
-        Legacy combined extractor for code + context.
-        Returns: {"code": str, "context": str}
-        """
-        data = cls._content_dict(response)
-        code = data.get("code", "")
-        context = data.get("context", "")
-        return {
-            "code": code if isinstance(code, str) else "",
-            "context": context if isinstance(context, str) else "",
-        }
-
-    # ------------------------------------------------------------------ #
-    # New: agent/actions helpers
+    # Agent/actions helpers
     # ------------------------------------------------------------------ #
     @classmethod
     def extract_agent(cls, response: Dict[str, Any]) -> Dict[str, Any]:

@@ -1,10 +1,3 @@
-# === CONTEXT START ===
-# This code defines a Python data class named RepoConfig using the @dataclass
-# decorator. It includes type hints for each field and a class-level docstring
-# that describes the purpose of the class and its attributes. Default values are
-# provided for all fields except repo_path.
-# === CONTEXT END ===
-
 from dataclasses import dataclass
 
 @dataclass

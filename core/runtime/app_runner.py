@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from core.logger import BasicLogger
-from core.ai_client.ai_client import OpenAIClient
+from core.ai_client.openai_client import OpenAIClient
 from core.ai_client.ai_response_parser import AIResponseParser
 from core.files.file_writer import FileWriter
 from core.actions.registry import ActionRegistry
@@ -37,7 +37,7 @@ class ActionRuntimeContext(ActionContext):
     """Concrete runtime context passed to actions.
 
     Extends ActionContext with additional fields used by specific actions and
-    by the orchestrator (e.g. retry flags).
+    by the orchestrator (e.g. retry flags, enforced target file).
     """
 
     target_file: Optional[str] = None
@@ -46,7 +46,12 @@ class ActionRuntimeContext(ActionContext):
 
 
 def execute_actions(actions_list: List[Dict[str, Any]], ctx: ActionRuntimeContext) -> None:
-    """Instantiate and execute actions using the registry."""
+    """Instantiate and execute actions using the registry.
+
+    Enforces the invariant:
+    - If ctx.target_file is set and an action is 'file_write', its path is overridden by ctx.target_file.
+    - If ctx.target_file is empty/None and an action is 'file_write', that action is skipped.
+    """
     logger = ctx.logger
 
     for index, raw in enumerate(actions_list, start=1):
@@ -64,6 +69,19 @@ def execute_actions(actions_list: List[Dict[str, Any]], ctx: ActionRuntimeContex
                 "Invalid params for action '%s': %r", action.action_type, raw
             )
             continue
+
+        # Enforce target_file contract for file_write actions
+        if action.action_type == "file_write":
+            if not ctx.target_file:
+                logger.warning(
+                    "Skipping file_write action #%s: run has no target_file set.",
+                    index,
+                )
+                continue
+
+            # Override any model-provided path; run.target_file is the single source of truth
+            if hasattr(action, "params") and isinstance(action.params, dict):
+                action.params["target_path"] = ctx.target_file
 
         logger.info("Executing action #%s: %s", index, action.action_type)
         action.execute(ctx)
@@ -120,7 +138,6 @@ class AppRunner:
         task_description: str,
         agent_input_overrides: Dict[str, Any],
     ) -> RunResult:
-
         """Execute a single model call + actions for the given run.
 
         `run_params` must already be a valid OpenAI payload (model, messages, ...).
@@ -129,6 +146,7 @@ class AppRunner:
         logger = self.logger
         logger.info("Starting AppRunner for profile '%s'", profile_name)
 
+        # For logging: which context files were actually used for this run
         context_files_display = run_params.pop("_context_files_display", None)
         if context_files_display:
             logger.info("Using context files: %s", context_files_display)
@@ -140,7 +158,6 @@ class AppRunner:
             class_name=class_name,
             base_agent_input=agent_input_overrides,
         )
-
 
         rules_block = build_rules_block_for_run(run_item)
         context_block = run_params.pop("_context_block", "")
@@ -208,7 +225,7 @@ class AppRunner:
             )
             return RunResult(success=False, retry_requested=False)
 
-        # Execute actions
+        # Execute actions with runtime context including enforced target_file
         runtime_ctx = ActionRuntimeContext(
             project_root=self.project_root,
             file_writer=self.file_writer,

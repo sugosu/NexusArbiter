@@ -5,25 +5,19 @@ import json
 from typing import Any, Dict, List, Optional
 
 from core.config.run_config import RunItem
-from core.files.class_reader import PythonFileReader
-
-
-from typing import Any, Dict, List, Optional
-
-from core.config.run_config import RunItem
 
 
 def build_agent_input(
     run_item: RunItem,
     profile_name: str,
     class_name: Optional[str],
-    base_agent_input: Dict[str, Any],
+    base_agent_input: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """Construct the agent_input object passed into the model.
 
     This combines:
     - static runtime info (profile_name, class_name)
-    - per-run agent_input overrides from the config
+    - per-run agent_input overrides from the profile/run
     - the target_file path if present
     """
     agent_input_obj: Dict[str, Any] = {
@@ -31,7 +25,6 @@ def build_agent_input(
         "class_name": class_name or None,
     }
 
-    # Merge any extra agent_input passed from the run (optional)
     if isinstance(base_agent_input, dict) and base_agent_input:
         agent_input_obj.update(base_agent_input)
 
@@ -41,12 +34,11 @@ def build_agent_input(
     return agent_input_obj
 
 
-
 def build_rules_block_for_run(run_item: RunItem) -> str:
     """Build a markdown-style rules block string for this run.
 
     - Uses per-run rules from runs.json (run_item.rules).
-    - Optionally defines a few global rules in base_rules.
+    - Adds a small set of global rules.
     - Deduplicates while preserving order.
     """
     base_rules: List[str] = [

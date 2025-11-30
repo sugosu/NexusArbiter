@@ -6,7 +6,7 @@
       "context_file": [
         "context_files/profiles/project_manifest_generator.json"
       ],
-      "target_file": "",
+      "target_file": "test/tetris_manifest.json",
       "agent_input": {
         "goal": "Design a project manifest for a small Python command-line todo list manager. The application runs as a CLI, lets users add, list, complete, and delete tasks stored in a local JSON file, and should be structured into modules for the CLI interface, a task service, a persistence layer, and tests.",
         "language": "python",
@@ -17,7 +17,7 @@
       "retry": 0,
       "retry_context_files": [],
       "allowed_actions": [
-        "generate_profile_file"
+        "file_write"
       ],
       "extra_params": {}
     }

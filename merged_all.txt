@@ -8,15 +8,11 @@ from __future__ import annotations
 
 import argparse
 from pathlib import Path
-from typing import Optional
 
 from dotenv import load_dotenv
 
 from core.config.run_config import RunConfig
-from core.runtime.run_executor import RunExecutor
-
-# Load .env once at entry point
-load_dotenv()
+from core.runtime.pipeline_runner import PipelineRunner
 
 
 def parse_args() -> argparse.Namespace:
@@ -30,83 +26,26 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-if __name__ == "__main__":
+def main() -> None:
+    load_dotenv()
+
     args = parse_args()
-
     project_root = Path(__file__).resolve().parent
+
     config = RunConfig.from_file(args.config)
+    runner = PipelineRunner(project_root=project_root, config=config)
 
-    executor = RunExecutor(project_root=project_root)
+    result = runner.run()
 
-    total_runs = len(config.runs)
-    retry_from: Optional[int] = getattr(config, "retry_from", None)
+    # Optional: exit code or final summary
+    print(
+        f"Pipeline finished: {result.succeeded}/{result.total_runs} succeeded, "
+        f"{result.failed} failed, pipeline_retried={result.pipeline_retried}"
+    )
 
-    # Ensure retry_from is within [1, total_runs] if present
-    if retry_from is not None:
-        retry_from = max(1, min(retry_from, total_runs))
 
-    # Pipeline control
-    idx = 1                      # 1-based current run index
-    pipeline_retried = False     # allow only a single pipeline-level restart
-    restart_from_index: Optional[int] = None  # where to restart AND force retry_context
-
-    while idx <= total_runs:
-        run = config.runs[idx - 1]
-
-        # If we just restarted the pipeline from a specific index,
-        # then for that first run we want retry_context_files to override
-        # the normal context_file from the very first attempt.
-        use_retry_ctx_first = restart_from_index is not None and idx == restart_from_index
-
-        # Consume the flag so it applies only to this first restarted run.
-        if use_retry_ctx_first:
-            restart_from_index = None
-
-        result = executor.execute(
-            run=run,
-            run_index=idx,
-            use_retry_context_on_first_attempt=use_retry_ctx_first,
-        )
-
-        status = "OK" if result.success else "FAILED"
-        if result.retried:
-            print(
-                f"[RUN {idx}] finished with status {status} after {result.attempts} attempts. "
-                f"Retry reason (last): {result.last_retry_reason or '<none>'}."
-            )
-        else:
-            print(
-                f"[RUN {idx}] finished with status {status} after {result.attempts} attempts."
-            )
-
-        # Pipeline-level retry_from logic:
-        #
-        # If:
-        #   - this run did NOT succeed,
-        #   - the RunExecutor reports that the agent requested retry at some point
-        #     (result.retried == True), and
-        #   - the config defines retry_from,
-        #   - and we have not yet used the pipeline-level restart,
-        # then:
-        #   - restart the pipeline from retry_from,
-        #   - and for that first restarted run, force use of retry_context_files.
-        if (
-            not result.success
-            and result.retried
-            and retry_from is not None
-            and not pipeline_retried
-        ):
-            print(
-                f"[RUN {idx}] pipeline-level retry_from triggered; "
-                f"restarting from run index {retry_from} "
-                f"using retry_context_files for that run (if configured)."
-            )
-            pipeline_retried = True
-            restart_from_index = retry_from
-            idx = retry_from
-            continue
-
-        idx += 1
+if __name__ == "__main__":
+    main()
 
 
 
@@ -158,48 +97,6 @@ if __name__ == "__main__":
 
 
 ================================================================================
-FILE: C:\projects\aiAgency\app\app.py
-================================================================================
-
-# app/app.py
-from __future__ import annotations
-
-from pathlib import Path
-from typing import Any, Dict, Optional
-
-from core.config.run_config import RunItem
-from core.runtime.app_runner import AppRunner, RunResult
-
-
-def main(
-    profile_name: str,
-    class_name: Optional[str],
-    task_description: str,
-    agent_input: Dict[str, Any],
-    run_item: RunItem,
-    run_params: Dict[str, Any],
-) -> Dict[str, bool]:
-    """Thin wrapper around AppRunner (kept for backward compatibility)."""
-    project_root = Path(__file__).resolve().parents[1]
-    runner = AppRunner(project_root=project_root)
-
-    result: RunResult = runner.run(
-        run_item=run_item,
-        run_params=run_params,
-        profile_name=profile_name,
-        class_name=class_name,
-        task_description=task_description,
-        agent_input_overrides=agent_input,
-    )
-
-    return {
-        "success": result.success,
-        "retry_requested": result.retry_requested,
-    }
-
-
-
-================================================================================
 FILE: C:\projects\aiAgency\app\__pycache__\__init__.py
 ================================================================================
 
@@ -240,6 +137,41 @@ FILE: C:\projects\aiAgency\context_files\actions\actions_spec.json
         "Include a short 'reason' string explaining why you are requesting a retry.",
         "Do not perform any side effects in this action; it should only request a retry."
       ]
+    }
+  ]
+}
+
+
+
+================================================================================
+FILE: C:\projects\aiAgency\context_files\configs\from_manifest.json
+================================================================================
+
+{
+  "runs": [
+    {
+      "context_file": [
+                "context_files/profiles/project_planner.json",
+        "context_files/project/project_manifest_tetris.json"
+
+      ],
+      "target_file": "configs/from_manifest_runs.json",
+      "task_description": "Using the project manifest provided in the second context file, generate a runs.json configuration that creates code for all non-test modules and classes described in the manifest. The planner must ignore the manifest's test specifications and produce only code_generation steps for implementation files.",
+      "agent_input": {
+        "goal": "Read the project manifest from context and generate a runs.json plan that uses only the code_generation profile to implement every non-test module and class defined in the manifest. Each run step should correspond to a single implementation file path from the manifest, and the final configuration must be written to configs/from_manifest_runs.json.",
+        "target_runs_path": "configs/from_manifest_runs.json"
+      },
+      "rules": [],
+      "retry": 2,
+      "retry_from": 0,
+      "retry_context_files": [
+        "context_files/project/project_manifest_tetris.json",
+        "context_files/profiles/project_planner.json"
+      ],
+      "allowed_actions": [
+        "file_write"
+      ],
+      "extra_params": {}
     }
   ]
 }
@@ -364,7 +296,7 @@ FILE: C:\projects\aiAgency\context_files\configs\tetris_manifest.json
       "retry": 0,
       "retry_context_files": [],
       "allowed_actions": [
-        "generate_profile_file"
+        "file_write"
       ],
       "extra_params": {}
     }
@@ -515,7 +447,7 @@ FILE: C:\projects\aiAgency\context_files\profiles\project_manifest_generator.jso
   "messages": [
     {
       "role": "system",
-      "content": "You are an AI Project Manifest Designer inside aiAgency.\n\nOUTPUT RULES:\n- ALWAYS respond with a single JSON object containing an 'agent' key.\n- No markdown. No prose. No backticks.\n\nFORMAT:\n{\n  \"agent\": {\n    \"name\": string,\n    \"version\": string,\n    \"actions\": [ action, ... ]\n  }\n}\n\nEach action is an object with:\n- \"type\": string\n- \"params\": object\n\nALLOWED ACTION TYPE:\n1) \"generate_profile_file\"\n   params = {\n     \"target_path\": string,\n     \"content\": string,\n     \"context\": string\n   }\n\nBEHAVIOUR:\n- Generate ONLY the project manifest JSON.\n- 'content' MUST contain a single valid JSON object following the schema and semantic rules in task_description.\n- No trailing commas, no comments.\n- No text outside the JSON envelope.\n\nINTERPRETATION RULES:\n- Read agent_input.goal, agent_input.language, agent_input.root_path, agent_input.target_manifest_path.\n- Derive a coherent architecture: modules, classes, fields, methods and tests, with detailed descriptions and interaction explanations.\n\nTARGET PATH RULES:\n- If agent_input.target_manifest_path is provided, use it as params.target_path.\n- Otherwise, use \"project_manifest.json\" as params.target_path.\n\nDECISION RULES:\n- You MUST return at least one 'generate_profile_file' action containing the full manifest JSON text in 'content'.\n- The 'actions' array MUST NOT be empty.\n- You MUST NOT invent new action types.\n- You MUST NOT output anything outside the envelope.\n\nTASK DESCRIPTION (FULL SPEC):\nAct as a project manifest designer for the aiAgency framework.\n\nYour job is to convert a high-level project description (for example: \"Design me a microservice with multiple modules\", \"Build a CLI tool\", \"Create a game engine\", etc.) into a concrete **Project Manifest** JSON file.\n\nThe output of this profile is NOT source code and NOT runs.json. It is a **single JSON object** with a fixed schema describing the entire project: modules, classes, fields, methods, and tests, including rich semantic context so that another AI can implement the code purely from this manifest.\n\nPROJECT MANIFEST SCHEMA (MANDATORY)\nThe top-level object MUST be:\n{\n  \"project_name\": string,\n  \"description\": string,\n  \"language\": string,\n  \"root_path\": string,\n  \"modules\": [\n    {\n      \"module_name\": string,\n      \"description\": string,\n      \"classes\": [\n        {\n          \"class_name\": string,\n          \"file_path\": string,\n          \"description\": string,\n          \"fields\": [\n            {\n              \"name\": string,\n              \"type\": string,\n              \"description\": string\n            }\n          ],\n          \"methods\": [\n            {\n              \"name\": string,\n              \"description\": string,\n              \"parameters\": [\n                {\n                  \"name\": string,\n                  \"type\": string,\n                  \"description\": string\n                }\n              ],\n              \"returns\": string\n            }\n          ]\n        }\n      ]\n    }\n  ],\n  \"tests\": [\n    {\n      \"target_class\": string,\n      \"file_path\": string,\n      \"description\": string\n    }\n  ]\n}\n\nSTRUCTURAL REQUIREMENTS\n- All keys above MUST exist at the top level.\n- Arrays (modules, classes, fields, methods, tests) MAY be empty where reasonable, but MUST still be present.\n- All strings MUST use double quotes.\n- No comments or trailing commas.\n- You MUST NOT add extra top-level keys.\n- You MUST NEVER use a \"params\" object for methods. You MUST ALWAYS use a \"parameters\" array of parameter objects.\n\nSEMANTIC CONTEXT REQUIREMENTS (CRITICAL)\nYour manifest MUST provide enough information for a code generator to implement the project **without guessing the architecture**.\n\n1) PROJECT LEVEL\n- \"project_name\": short, descriptive.\n- \"description\": 3–8 sentences explaining:\n  - Overall purpose and main features.\n  - External environment (CLI, HTTP API, game loop, batch job, etc.).\n  - Main subsystems (high-level list of modules/classes).\n  - Key data flows and control flows between subsystems.\n\n2) MODULE LEVEL\n- \"module_name\": import-style name (e.g. \"app.core\", \"service.api\", \"engine.renderer\").\n- \"description\": 4–8 sentences describing:\n  - Responsibility of this module.\n  - Which classes it contains and what roles they play.\n  - Which other modules it depends on or calls.\n  - Typical scenarios in which this module is used.\n- Descriptions MUST be concrete (no vague \"handles logic\" type descriptions).\n\n3) CLASS LEVEL\n- \"class_name\": clear, coherent name that reflects responsibility.\n- \"file_path\": exact source file path relative to repo root (e.g. \"app/core/service.py\", \"src/api/client.ts\").\n- \"description\": 5–10 sentences describing the semantic contract of the class:\n  - What the class represents.\n  - Its main responsibilities.\n  - What invariants it maintains.\n  - Which other classes it collaborates with and how.\n  - Typical lifecycle / usage pattern (who creates it, which public methods are called in which sequence).\n  - Any important error-handling or state-transition rules.\n\n4) FIELD LEVEL\n- Each field MUST contain:\n  - \"name\": field/attribute name.\n  - \"type\": type string (e.g. \"int\", \"str\", \"float\", \"Board\", \"List[Task]\", etc., depending on language).\n  - \"description\": at least 2 sentences describing what is stored, how it affects behaviour, and any constraints (ranges, units, etc.).\n\n5) METHOD LEVEL\n- Each method MUST contain:\n  - \"name\": method name.\n  - \"description\": 4–8 sentences describing:\n    - What the method does in domain terms.\n    - When and by whom it is called.\n    - How it interacts with fields and other classes.\n    - Important branches/conditions and side effects.\n    - Failure modes, preconditions, or important edge cases.\n  - \"parameters\": list of parameter objects; MAY be empty, but MUST be present.\n  - \"returns\": return type string (or \"None\" / \"void\" where appropriate).\n\n6) PARAMETER LEVEL\n- Each parameter MUST contain:\n  - \"name\": parameter name.\n  - \"type\": type string.\n  - \"description\": 1–3 sentences describing its meaning, valid values, and how it influences behaviour.\n\n7) TEST LEVEL\n- Each test spec MUST contain:\n  - \"target_class\": the class name or fully-qualified class name being tested.\n  - \"file_path\": test file path (e.g. \"tests/test_board.py\", \"tests/unit/test_service.py\").\n  - \"description\": 3–6 sentences describing behavioural aspects and invariants being tested, key scenarios, and edge cases.\n- You MUST include at least one test entry for each central/critical class.\n\nLANGUAGE & ROOT PATH RULES\n- If agent_input.language is provided, set \"language\" to that value (e.g. \"python\", \"typescript\", \"java\").\n- Otherwise default to \"python\".\n- If agent_input.root_path is provided, use it for \"root_path\".\n- Otherwise choose a concise, sensible default based on the project goal (e.g. \"app\", \"service\", \"engine\", \"project\").\n\nFILE PATH RULES\n- Every class MUST have a non-empty \"file_path\".\n- If the user does not provide specific file paths, derive them consistently from root_path and module_name (for example, for language \"python\": root_path + \"/\" + last segment of module_name + \".py\").\n\nCOHERENCE & INTERACTIONS (VERY IMPORTANT)\n- The manifest MUST describe a coherent, interconnected architecture.\n- Whenever a method is described as using another class or method, that class/method MUST exist in the manifest with matching names.\n- Import relationships implied by \"file_path\" and \"module_name\" MUST be realistic for the chosen language.\n- Avoid contradictions between descriptions and types.\n\nVALIDATION BEFORE OUTPUT (MANDATORY)\nBefore producing the final JSON manifest, you MUST validate internally that:\n- All modules contain module_name, description, and classes[].\n- All classes contain class_name, file_path, description, fields[], and methods[].\n- All methods contain name, description, parameters[], and returns.\n- No method uses any key named \"params\"; ONLY \"parameters\" is allowed.\n- All fields contain name, type, and description, and field descriptions are at least 2 sentences.\n- All descriptions (project, modules, classes, methods, tests) meet the required sentence-length rules stated above.\n- All tests contain target_class, file_path, and description.\n\nIf this validation fails, you MUST correct and regenerate the manifest content until it satisfies all rules before returning it.\n\nOUTPUT TARGET (PATH)\n- If agent_input.target_manifest_path is provided, you MUST set the output file path to that.\n- Otherwise, you MUST default to:\n  \"project_manifest.json\"\n\nBEHAVIOUR SUMMARY\n- You are NOT generating source code.\n- You are NOT generating runs.json.\n- You generate ONE project manifest JSON object that:\n  - Strictly follows the schema.\n  - Provides rich semantic context as described above."
+      "content": "You are an AI Project Manifest Designer inside aiAgency.\n\nOUTPUT RULES:\n- ALWAYS respond with a single JSON object containing an 'agent' key.\n- No markdown. No prose. No backticks.\n\nFORMAT:\n{\n  \"agent\": {\n    \"name\": string,\n    \"version\": string,\n    \"actions\": [ action, ... ]\n  }\n}\n\nEach action is an object with:\n- \"type\": string\n- \"params\": object\n\nALLOWED ACTION TYPE:\n1) \"file_write\"\n   params = {\n     \"target_path\": string,\n     \"code\": string,\n     \"context\": string\n   }\n\nBEHAVIOUR:\n- Generate ONLY the project manifest JSON.\n- 'code' MUST contain a single valid JSON object following the schema and semantic rules in the TASK DESCRIPTION.\n- No trailing commas, no comments.\n- No text outside the JSON envelope.\n\nINTERPRETATION RULES:\n- Read agent_input.goal, agent_input.language, agent_input.root_path, agent_input.target_manifest_path.\n- Derive a coherent architecture: modules, classes, fields, methods and tests, with detailed descriptions and interaction explanations.\n\nTARGET PATH RULES:\n- If agent_input.target_manifest_path is provided, use it as params.target_path.\n- Otherwise, use \"project_manifest.json\" as params.target_path.\n\nDECISION RULES:\n- You MUST return at least one 'file_write' action containing the full manifest JSON text in 'code'.\n- The 'actions' array MUST NOT be empty.\n- You MUST NOT invent new action types.\n- You MUST NOT output anything outside the envelope.\n\nTASK DESCRIPTION (FULL SPEC):\nAct as a project manifest designer for the aiAgency framework.\n\nYour job is to convert a high-level project description (for example: \"Design me a microservice with multiple modules\", \"Build a CLI tool\", \"Create a game engine\", etc.) into a concrete **Project Manifest** JSON file.\n\nThe output of this profile is NOT source code and NOT runs.json. It is a **single JSON object** with a fixed schema describing the entire project: modules, classes, fields, methods, and tests, including rich semantic context so that another AI can implement the code purely from this manifest.\n\nPROJECT MANIFEST SCHEMA (MANDATORY)\nThe top-level object MUST be:\n{\n  \"project_name\": string,\n  \"description\": string,\n  \"language\": string,\n  \"root_path\": string,\n  \"modules\": [\n    {\n      \"module_name\": string,\n      \"description\": string,\n      \"classes\": [\n        {\n          \"class_name\": string,\n          \"file_path\": string,\n          \"description\": string,\n          \"fields\": [\n            {\n              \"name\": string,\n              \"type\": string,\n              \"description\": string\n            }\n          ],\n          \"methods\": [\n            {\n              \"name\": string,\n              \"description\": string,\n              \"parameters\": [\n                {\n                  \"name\": string,\n                  \"type\": string,\n                  \"description\": string\n                }\n              ],\n              \"returns\": string\n            }\n          ]\n        }\n      ]\n    }\n  ],\n  \"tests\": [\n    {\n      \"target_class\": string,\n      \"file_path\": string,\n      \"description\": string\n    }\n  ]\n}\n\nSTRUCTURAL REQUIREMENTS\n- All keys above MUST exist at the top level.\n- Arrays (modules, classes, fields, methods, tests) MAY be empty where reasonable, but MUST still be present.\n- All strings MUST use double quotes.\n- No comments or trailing commas.\n- You MUST NOT add extra top-level keys.\n- You MUST NEVER use a \"params\" object for methods. You MUST ALWAYS use a \"parameters\" array of parameter objects.\n\nSEMANTIC CONTEXT REQUIREMENTS (CRITICAL)\nYour manifest MUST provide enough information for a code generator to implement the project **without guessing the architecture**.\n\n1) PROJECT LEVEL\n- \"project_name\": short, descriptive.\n- \"description\": 3–8 sentences explaining:\n  - Overall purpose and main features.\n  - External environment (CLI, HTTP API, game loop, batch job, etc.).\n  - Main subsystems (high-level list of modules/classes).\n  - Key data flows and control flows between subsystems.\n\n2) MODULE LEVEL\n- \"module_name\": import-style name (e.g. \"app.core\", \"service.api\", \"engine.renderer\").\n- \"description\": 4–8 sentences describing:\n  - Responsibility of this module.\n  - Which classes it contains and what roles they play.\n  - Which other modules it depends on or calls.\n  - Typical scenarios in which this module is used.\n\n3) CLASS LEVEL\n- \"class_name\": clear, coherent name that reflects responsibility.\n- \"file_path\": exact source file path relative to repo root (e.g. \"app/core/service.py\").\n- \"description\": 5–10 sentences describing the semantic contract of the class.\n\n4) FIELD LEVEL\n- Each field MUST contain name, type, and description (at least 2 sentences).\n\n5) METHOD LEVEL\n- Each method MUST contain name, description (4–8 sentences), parameters[], and returns.\n\n6) PARAMETER LEVEL\n- Each parameter MUST contain name, type, and description.\n\n7) TEST LEVEL\n- Each test spec MUST contain target_class, file_path, and description (3–6 sentences).\n- Include at least one test entry for each central/critical class.\n\nLANGUAGE & ROOT PATH RULES\n- If agent_input.language is provided, set \"language\" to that value; otherwise default to \"python\".\n- If agent_input.root_path is provided, use it for \"root_path\"; otherwise choose a concise, sensible default.\n\nFILE PATH RULES\n- Every class MUST have a non-empty \"file_path\".\n- Derive paths consistently from root_path and module_name when not explicitly provided.\n\nCOHERENCE & INTERACTIONS (VERY IMPORTANT)\n- The manifest MUST describe a coherent, interconnected architecture.\n- Whenever a method is described as using another class or method, that class/method MUST exist in the manifest with matching names.\n- Import relationships implied by \"file_path\" and \"module_name\" MUST be realistic for the chosen language.\n\nVALIDATION BEFORE OUTPUT (MANDATORY)\nYou MUST validate internally that the manifest obeys all schema and semantic requirements before returning it.\n\nOUTPUT TARGET (PATH)\n- If agent_input.target_manifest_path is provided, you MUST set params.target_path to that.\n- Otherwise, default to \"project_manifest.json\".\n\nSUMMARY\n- You are NOT generating source code.\n- You are NOT generating runs.json.\n- You generate ONE project manifest JSON object and write it via a single 'file_write' action."
     },
     {
       "role": "user",
@@ -543,12 +475,12 @@ FILE: C:\projects\aiAgency\context_files\profiles\project_planner.json
   "top_p": 1,
   "max_tokens": 3000,
 
-  "task_description": "Act as a project planner for the aiAgency framework.\n\nYour job is to convert a high-level project description (for example: \"Design me a Tetris game with all necessary classes and modules\") into a concrete aiAgency run configuration file (runs.json).\n\nThe output of this profile is NOT Python code, but a JSON configuration file with a top-level 'runs' array. Each element in 'runs' is a single step that aiAgency will execute using an existing profile.\n\nFor THIS planner, you MUST:\n- Use ONLY the 'code_generation' profile in every run step.\n- Create run steps ONLY for modules/classes (no tests, no refactor runs, no other actions).\n\nYou must:\n- Decompose the requested project into coherent components (modules/classes).\n- For each component, create a run using the 'code_generation' profile.\n- Order the steps logically so that foundational modules are generated before higher-level orchestration modules.\n- Produce a single JSON object of the form { \"runs\": [ ... ] }.\n- The JSON must be valid, with no comments, no trailing commas, and double-quoted keys/strings.\n\nPROJECT_STRUCTURE REQUIREMENT (CRITICAL):\n- From the high-level project goal, derive a single multiline text description called PROJECT_STRUCTURE.\n- PROJECT_STRUCTURE MUST describe the ENTIRE project, not just a single file.\n- PROJECT_STRUCTURE MUST be CONCRETE but COMPACT.\n- It MUST include, for the whole project (using short bullets/lines):\n  - The list of all modules with file paths (for the Tetris game, this MUST include at least: \"tetris/config.py\", \"tetris/tetromino.py\", \"tetris/board.py\", \"tetris/renderer.py\", \"tetris/input_handler.py\", \"tetris/game_loop.py\", and the entrypoint \"tetris/main.py\").\n  - For each module: the main classes and/or functions it defines.\n  - For each class: key public attributes/fields and method names, with parameter lists where relevant (e.g. GameLoop.start(self), InputHandler.get_input(self) -> str | None).\n  - How modules/classes depend on and call each other (e.g. \"GameLoop uses Board.remove_full_lines() and Renderer.render(board)\").\n- ENTRYPOINT LOCATION (TETRIS-SPECIFIC):\n  - When the goal describes a Tetris game (as in this use case), the entrypoint MUST be located at \"tetris/main.py\" inside the tetris package.\n  - You MUST NOT create or modify any root-level \"main.py\" file at the repository root.\n  - The file \"tetris/main.py\" MUST:\n    - Define a main() function.\n    - Import GameLoop from \"tetris/game_loop.py\" using the correct import path.\n    - Instantiate GameLoop() (with the constructor signature defined in PROJECT_STRUCTURE).\n    - Call game.start() (or equivalent loop method defined in PROJECT_STRUCTURE).\n- PROJECT_STRUCTURE MUST form a coherent API contract: other modules MUST be able to compile/run against these class and method signatures.\n- Vague descriptions like \"this module handles game settings\" WITHOUT listing class, attributes, and method names are NOT sufficient.\n- PROJECT_STRUCTURE MUST be constructed ONCE for the whole project and then reused as a CONSTANT string.\n\nTASK_DESCRIPTION FORMAT (MANDATORY):\nFor EVERY run object you output in 'runs', you MUST construct 'task_description' with THREE parts in this exact order:\n\n1) FILE_SPECIFIC_INSTRUCTION\n   - A short, file-specific instruction (1–3 sentences) describing what to generate for that file.\n   - Example: \"Implement the GameLoop class in tetris/game_loop.py. It should control the main game loop and be runnable via GameLoop().start().\"\n\n2) IMPLEMENTATION RULES (MANDATORY)\n   - Immediately after FILE_SPECIFIC_INSTRUCTION, add two newline characters (\\n\\n) and then paste the following block EXACTLY, with no changes:\n\n   IMPLEMENTATION RULES (MANDATORY)\n   - Below there is a section titled PROJECT_STRUCTURE.\n   - PROJECT_STRUCTURE defines the entire project architecture: modules, classes, methods, attributes, and their relationships.\n   - Treat PROJECT_STRUCTURE as the SINGLE SOURCE OF TRUTH for the architecture.\n   - You MUST:\n     - Implement ONLY the classes/functions that PROJECT_STRUCTURE assigns to THIS file (this module path).\n     - Use EXACT class names, method names, and attribute names from PROJECT_STRUCTURE.\n     - Use EXACT method parameter lists from PROJECT_STRUCTURE.\n     - Import external classes/functions using the EXACT module paths and names in PROJECT_STRUCTURE.\n     - When you need to use another class, ALWAYS import it instead of redefining it.\n   - You MUST NOT:\n     - Invent new public class names, method names, or modules that are not mentioned in PROJECT_STRUCTURE.\n     - Move classes to different modules than specified.\n     - Change method signatures (names or parameters) defined in PROJECT_STRUCTURE.\n   - If the file-specific instruction above conflicts with PROJECT_STRUCTURE, PROJECT_STRUCTURE WINS.\n   - Output ONLY valid Python code for THIS file (no comments about other files, no extra text around the code).\n\n3) PROJECT_STRUCTURE\n   - After the IMPLEMENTATION RULES block, add two newline characters (\\n\\n) and then the literal header line:\n     PROJECT_STRUCTURE\n   - On the following lines, paste the global PROJECT_STRUCTURE text you derived earlier.\n   - This PROJECT_STRUCTURE text MUST be IDENTICAL for every run (same characters, same whitespace). You MUST NOT specialize, trim, or modify PROJECT_STRUCTURE per file.\n\nYou do NOT execute the plan yourself. Instead, you write a runs.json file that other aiAgency runs will later execute.\n\nThe resulting runs.json MUST:\n- Have top-level key 'runs' mapped to an array.\n- Each run object MUST contain at least 'profile_name', 'class_name', and 'task_description'.\n- You MAY add 'extra_params', where 'extra_params.target_path' SHOULD be equal to 'class_name'.\n- Use ONLY 'code_generation' as 'profile_name' in all run steps.\n\nIf agent_input.refactor.original_code is provided, treat it as the existing runs.json content, and update/extend it according to the new project goal while preserving unrelated steps. If no refactor.original_code is present, create a new runs.json from scratch.",
+  "task_description": "Act as a project planner for the aiAgency framework.\n\nYour job is to convert a high-level project description (for example: \"Design me a Tetris game with all necessary classes and modules\") into a concrete aiAgency run configuration file (runs.json).\n\nThe output of this profile is NOT Python code, but a JSON configuration file with a top-level 'runs' array. Each element in 'runs' is a single step that aiAgency will execute using an existing profile.\n\nFor THIS planner, you MUST:\n- Use ONLY the 'code_generation' profile in every run step.\n- Create run steps ONLY for modules/classes (no tests, no refactor runs, no other actions).\n\nYou must:\n- Decompose the requested project into coherent components (modules/classes).\n- For each component, create a run using the 'code_generation' profile.\n- Order the steps logically so that foundational modules are generated before higher-level orchestration modules.\n- Produce a single JSON object of the form { \"runs\": [ ... ] }.\n- The JSON must be valid, with no comments, no trailing commas, and double-quoted keys/strings.",
 
   "messages": [
     {
       "role": "system",
-      "content": "You are an AI Project Planner working inside the aiAgency framework.\n\nYour task is to produce COMPLETE run configuration files (runs.json) that define multi-step pipelines for aiAgency.\n\nOUTPUT FORMAT (MANDATORY):\nYou MUST ALWAYS respond with a single JSON object containing an 'agent' key and NOTHING else. No markdown, no prose, no backticks.\n\nThe response MUST have the form:\n{\n  \"agent\": {\n    \"name\": string,\n    \"version\": string,\n    \"actions\": [ action, ... ]\n  }\n}\n\nEach action is an object with:\n- \"type\": string\n- \"params\": object\n\nFor THIS profile you are allowed to use ONLY ONE action type:\n\n1) \"generate_profile_file\"\n   params:\n   {\n     \"target_path\": string,\n     \"content\": string,\n     \"context\": string\n   }\n\nBEHAVIOUR:\n- You are NOT generating Python modules here. You are generating a run configuration file that other profiles will use.\n- The 'content' string must be valid JSON representing a single object with top-level key 'runs'.\n- Do NOT include comments, trailing commas, or any non-JSON syntax inside 'content'.\n- Do NOT emit markdown or any text outside the single JSON object with the 'agent' key.\n\nPROJECT_STRUCTURE REQUIREMENT (CRITICAL):\n- At the beginning of planning, derive a single shared project structure description based on agent_input.goal (or equivalent). Treat this as a conceptual multiline string called PROJECT_STRUCTURE.\n- PROJECT_STRUCTURE MUST describe the ENTIRE project, not just a single file. It MUST be a concrete description of all relevant modules and classes, their public APIs, how they interact, and where the entrypoint lives.\n- For the Tetris game scenario, PROJECT_STRUCTURE MUST explicitly list the \"tetris/\" modules including the entrypoint at \"tetris/main.py\".\n- PROJECT_STRUCTURE MUST be built ONCE and then reused as a CONSTANT string for all runs.\n\nTASK_DESCRIPTION FORMAT (MANDATORY):\n- For EVERY run object you output in 'runs', you MUST construct 'task_description' as:\n  1) FILE_SPECIFIC_INSTRUCTION (1–3 sentences for THIS file only).\n  2) Two newline characters (\\n\\n).\n  3) The IMPLEMENTATION RULES (MANDATORY) block, pasted EXACTLY as specified in the profile task_description.\n  4) Two newline characters (\\n\\n).\n  5) The literal line: PROJECT_STRUCTURE\n  6) A newline, then the full PROJECT_STRUCTURE text.\n- The IMPLEMENTATION RULES block and PROJECT_STRUCTURE MUST be IDENTICAL across all runs.\n\nPLANNING RULES:\n- Read agent_input to understand the project goal.\n- For the Tetris game, decompose the project into modules/classes under the \"tetris/\" package (e.g. \"tetris/config.py\", \"tetris/tetromino.py\", \"tetris/board.py\", \"tetris/renderer.py\", \"tetris/input_handler.py\", \"tetris/game_loop.py\", and \"tetris/main.py\" as entrypoint).\n- You MUST NOT create or modify any files outside the \"tetris/\" directory when planning the Tetris game; in particular, do NOT target a root-level \"main.py\".\n- For EACH module or class file you decide to create, you MUST create a run step that:\n  - Uses \"profile_name\": \"code_generation\".\n  - Sets \"class_name\" to the intended file path (e.g. \"tetris/board.py\" or \"tetris/main.py\").\n  - Sets \"task_description\" according to the TASK_DESCRIPTION FORMAT (MANDATORY).\n  - Optionally sets \"extra_params.target_path\" equal to \"class_name\".\n- You MUST NOT use any other profile names in 'profile_name' besides \"code_generation\" when building 'runs'.\n- Do NOT create test files, refactor steps, or any other auxiliary actions in this planner. Only class/module generation runs are allowed.\n\nNEW vs REFACTOR MODE:\n- If agent_input.refactor.original_code is NOT provided:\n  - You are creating a brand new runs.json file from scratch.\n  - Choose a sensible default target_path for the run configuration (for example, use agent_input.target_runs_path if present, otherwise something like \"configs/project_runs.json\").\n- If agent_input.refactor.original_code IS provided:\n  - Treat it as the existing content of an existing runs.json.\n  - Preserve unrelated runs.\n  - Add, modify, or remove runs only as necessary to satisfy the new project goal.\n  - The final 'content' must still be a complete JSON object with top-level 'runs'.\n\nDECISION RULES:\n- For this profile, you MUST return AT LEAST ONE 'generate_profile_file' action containing the full runs.json text in 'content'.\n- The 'actions' array MUST NOT be empty.\n- Do NOT invent new action types.\n- Do NOT output markdown.\n- Do NOT wrap the JSON in backticks.\n- Do NOT include any text outside the single JSON object."
+      "content": "You are an AI project planner inside the aiAgency framework.\n\nOUTPUT RULES:\n- ALWAYS respond with a single JSON object containing an 'agent' key.\n- No markdown. No prose. No backticks.\n\nFORMAT:\n{\n  \"agent\": {\n    \"name\": string,\n    \"version\": string,\n    \"actions\": [ action, ... ]\n  }\n}\n\nEach action is an object with:\n- \"type\": string\n- \"params\": object\n\nALLOWED ACTION TYPE FOR THIS PROFILE:\n1) \"file_write\"\n   params:\n   {\n     \"target_path\": string,\n     \"code\": string,\n     \"context\": string\n   }\n\nBEHAVIOUR:\n- You are NOT generating Python modules here. You are generating a run configuration file (runs.json) that other profiles will use.\n- The 'code' string must be valid JSON representing a single object with top-level key 'runs'.\n- Do NOT include comments, trailing commas, or any non-JSON syntax inside 'code'.\n- Do NOT emit markdown or any text outside the single JSON object with the 'agent' key.\n\nPROJECT_STRUCTURE REQUIREMENT (CRITICAL):\n- From the high-level project goal, derive a single multiline text description called PROJECT_STRUCTURE.\n- PROJECT_STRUCTURE MUST describe the ENTIRE project, not just a single file.\n- PROJECT_STRUCTURE MUST be CONCRETE but COMPACT.\n- It MUST include, for the whole project:\n  - The list of all modules with file paths.\n  - For each module: the main classes and/or functions it defines.\n  - For each class: key public attributes/fields and method names (with parameters where relevant).\n  - How modules/classes depend on and call each other.\n\nTETRIS-SPECIFIC RULES (WHEN APPLICABLE):\n- For the Tetris game scenario, PROJECT_STRUCTURE MUST explicitly list the \"tetris/\" modules including the entrypoint at \"tetris/main.py\".\n- You MUST NOT create or modify any files outside the \"tetris/\" directory; in particular, do NOT target a root-level \"main.py\".\n- The entrypoint MUST be at \"tetris/main.py\".\n\nTASK_DESCRIPTION FORMAT (MANDATORY):\nFor EVERY run object you output in 'runs', you MUST construct 'task_description' as:\n  1) FILE_SPECIFIC_INSTRUCTION (1–3 sentences for THIS file only).\n  2) Two newline characters (\\n\\n).\n  3) An IMPLEMENTATION RULES block (taken from the profile task_description or constructed in a similar spirit).\n  4) Two newline characters (\\n\\n).\n  5) The literal line: PROJECT_STRUCTURE\n  6) A newline, then the full PROJECT_STRUCTURE text.\n\nPLANNING RULES:\n- Read agent_input to understand the project goal.\n- Decompose the project into modules/classes under the appropriate package (for Tetris, under \"tetris/\").\n- For EACH module or class file you decide to create, you MUST create a run step that:\n  - Uses \"profile_name\": \"code_generation\".\n  - Sets \"class_name\" to the intended file path (e.g. \"tetris/board.py\", \"tetris/main.py\").\n  - Sets \"task_description\" according to the TASK_DESCRIPTION FORMAT.\n  - Optionally sets \"extra_params.target_path\" equal to \"class_name\".\n- You MUST NOT use any other profile names in 'profile_name' besides \"code_generation\" when building 'runs'.\n- Do NOT create test files, refactor steps, or any other auxiliary actions in this planner. Only class/module generation runs are allowed.\n\nNEW vs REFACTOR MODE:\n- If agent_input.refactor.original_code is NOT provided:\n  - You are creating a brand new runs.json file from scratch.\n  - Choose a sensible default target_path for the run configuration (for example, use agent_input.target_runs_path if present, otherwise something like \"configs/project_runs.json\").\n- If agent_input.refactor.original_code IS provided:\n  - Treat it as the existing content of an existing runs.json.\n  - Preserve unrelated runs.\n  - Add, modify, or remove runs only as necessary to satisfy the new project goal.\n  - The final 'code' must still be a complete JSON object with top-level 'runs'.\n\nDECISION RULES:\n- For this profile, you MUST return AT LEAST ONE 'file_write' action containing the full runs.json text in 'code'.\n- The 'actions' array MUST NOT be empty.\n- Do NOT invent new action types.\n- Do NOT output markdown.\n- Do NOT wrap the JSON in backticks.\n- Do NOT include any text outside the single JSON object."
     },
     {
       "role": "user",
@@ -750,52 +682,50 @@ FILE: C:\projects\aiAgency\context_files\rules\project_rules.json
 
 
 ================================================================================
-FILE: C:\projects\aiAgency\core\calculator.py
+FILE: C:\projects\aiAgency\core\app.py
 ================================================================================
 
-# === CONTEXT START ===
-# This module defines a reusable Calculator class in Python.
-# The class provides basic arithmetic operations such as addition,
-# subtraction, multiplication, and division.
-# === CONTEXT END ===
+# app/app.py
+from __future__ import annotations
 
-class Calculator:
-    """
-    A simple calculator class to perform basic arithmetic operations.
-    """
+from pathlib import Path
+from typing import Any, Dict, Optional
 
-    def add(self, a, b):
-        """Return the sum of a and b."""
-        return a + b
+from core.config.run_config import RunItem
+from core.runtime.app_runner import AppRunner, RunResult
 
-    def subtract(self, a, b):
-        """Return the difference of a and b."""
-        return a - b
 
-    def multiply(self, a, b):
-        """Return the product of a and b."""
-        return a * b
+def main(
+    profile_name: str,
+    class_name: Optional[str],
+    task_description: str,
+    agent_input: Dict[str, Any],
+    run_item: RunItem,
+    run_params: Dict[str, Any],
+) -> Dict[str, bool]:
+    """Thin wrapper around AppRunner (kept for backward compatibility)."""
+    project_root = Path(__file__).resolve().parents[1]
+    runner = AppRunner(project_root=project_root)
 
-    def divide(self, a, b):
-        """Return the quotient of a and b. Raises ValueError on division by zero."""
-        if b == 0:
-            raise ValueError("Cannot divide by zero.")
-        return a / b
+    result: RunResult = runner.run(
+        run_item=run_item,
+        run_params=run_params,
+        profile_name=profile_name,
+        class_name=class_name,
+        task_description=task_description,
+        agent_input_overrides=agent_input,
+    )
+
+    return {
+        "success": result.success,
+        "retry_requested": result.retry_requested,
+    }
 
 
 
 ================================================================================
 FILE: C:\projects\aiAgency\core\logger.py
 ================================================================================
-
-# === CONTEXT START ===
-# This code defines a BasicLogger class that can be easily initialized in other
-# classes to provide logging functionality. The logger is configured with a stream
-# handler and a formatter, and it ensures that multiple handlers are not added to
-# the logger. The example in the comment shows how to use the BasicLogger in
-# another class by initializing it with the class name and using it to log
-# messages.
-# === CONTEXT END ===
 
 import logging
 
@@ -811,19 +741,6 @@ class BasicLogger:
 
     def get_logger(self):
         return self.logger
-
-# Example of how to implement the logger in another class:
-#
-# class MyClass:
-#     def __init__(self):
-#         self.logger = BasicLogger(self.__class__.__name__).get_logger()
-#
-#     def do_something(self):
-#         self.logger.info('Doing something')
-#
-# my_instance = MyClass()
-# my_instance.do_something()
-
 
 
 ================================================================================
@@ -877,11 +794,6 @@ class BaseAction:
 ================================================================================
 FILE: C:\projects\aiAgency\core\actions\continue_action.py
 ================================================================================
-
-# === CONTEXT START ===
-# Action that controls the flow of execution by either continuing (no-op) or
-# breaking (raising an exception) based on the 'should_break' parameter.
-# === CONTEXT END ===
 
 from .base_action import BaseAction
 from .registry import ActionRegistry
@@ -938,7 +850,6 @@ FILE: C:\projects\aiAgency\core\actions\file_read.py
 from pathlib import Path
 from .base_action import BaseAction, ActionContext
 from .registry import ActionRegistry
-from core.files.class_reader import PythonFileReader
 
 
 class FileReadAction(BaseAction):
@@ -1030,114 +941,6 @@ ActionRegistry.register(FileWriteAction)
 
 
 ================================================================================
-FILE: C:\projects\aiAgency\core\actions\generate_path_index.py
-================================================================================
-
-# === CONTEXT START ===
-# This class scans a specified directory for Python files, extracts class names,
-# and builds an index mapping class names to their file paths.
-# === CONTEXT END ===
-
-class GeneratePathIndexAction:
-    def __init__(self, directory):
-        self.directory = directory
-
-    def build_index(self):
-        import os
-        index = {}
-        for root, _, files in os.walk(self.directory):
-            for file in files:
-                if file.endswith('.py'):
-                    module_path = os.path.join(root, file)
-                    class_name = self.extract_class_name(module_path)
-                    if class_name:
-                        index[class_name] = module_path
-        return index
-
-    def extract_class_name(self, file_path):
-        with open(file_path, 'r') as file:
-            for line in file:
-                if line.startswith('class '):
-                    return line.split()[1].split('(')[0]
-        return None
-
-
-================================================================================
-FILE: C:\projects\aiAgency\core\actions\generate_profile_file.py
-================================================================================
-
-# === CONTEXT START ===
-# Action that writes arbitrary text (typically JSON) into a file under the project
-# root. Ensures the directory exists and writes the content exactly as provided.
-# === CONTEXT END ===
-
-import logging
-from pathlib import Path
-from .base_action import BaseAction
-from .registry import ActionRegistry
-
-logger = logging.getLogger(__name__)
-
-class GenerateProfileFileAction(BaseAction):
-    action_type = "generate_profile_file"
-
-    def validate(self) -> bool:
-        target_path = self.params.get('target_path')
-        content = self.params.get('content')
-        if not isinstance(target_path, str) or not target_path:
-            logger.error("Validation failed: 'target_path' must be a non-empty string.")
-            return False
-        if not isinstance(content, str) or not content:
-            logger.error("Validation failed: 'content' must be a non-empty string.")
-            return False
-        return True
-
-    def execute(self, ctx) -> None:
-        target_path = self.params['target_path']
-        content = self.params['content']
-        _context = self.params.get('context', '')
-
-        full_path = ctx.file_writer.write_file(target_path, content)
-        logger.info(f"[generate_profile_file] Wrote profile file at {full_path}")
-
-
-ActionRegistry.register(GenerateProfileFileAction)
-
-
-
-================================================================================
-FILE: C:\projects\aiAgency\core\actions\generate_test_file.py
-================================================================================
-
-# === CONTEXT START ===
-# This action generates a test file at the specified target path with the provided
-# code. It validates the presence of 'code' and 'target_path' in the parameters
-# before execution. The action is registered with the ActionRegistry under the
-# action type 'generate_test_file'.
-# === CONTEXT END ===
-
-from core.actions.base_action import BaseAction
-from core.actions.registry import ActionRegistry
-
-class GenerateTestFileAction(BaseAction):
-    action_type = 'generate_test_file'
-
-    def validate(self, params):
-        if 'code' not in params or 'target_path' not in params:
-            raise ValueError("Parameters must include 'code' and 'target_path'.")
-
-    def execute(self, params):
-        self.validate(params)
-        code = params['code']
-        target_path = params['target_path']
-        with open(target_path, 'w') as file:
-            file.write(code)
-        return {'status': 'success', 'message': f'Test file generated at {target_path}'}
-
-ActionRegistry.register(GenerateTestFileAction)
-
-
-================================================================================
 FILE: C:\projects\aiAgency\core\actions\registry.py
 ================================================================================
 
@@ -1172,14 +975,6 @@ FILE: C:\projects\aiAgency\core\actions\request_retry.py
 ================================================================================
 
 # core/actions/request_retry.py
-
-# === CONTEXT START ===
-# Action that allows an agent to explicitly request a retry of the current run.
-# It does not perform any side effects on disk or Git; it only sets flags on the
-# ActionRuntimeContext so the orchestrator (main.py) can decide whether to
-# repeat this run.
-# === CONTEXT END ===
-
 from typing import Optional
 
 from .base_action import BaseAction, ActionContext
@@ -1230,21 +1025,134 @@ ActionRegistry.register(RequestRetryAction)
 FILE: C:\projects\aiAgency\core\actions\__init__.py
 ================================================================================
 
-# core/actions/__init__.py
-
-# Import all action modules here so they self-register in the registry.
 from . import file_write            # noqa: F401
 from . import file_read             # noqa: F401
 # from . import git_commit_and_push   # noqa: F401
-from . import generate_test_file    # noqa: F401
 from . import continue_action       # noqa: F401
-from . import generate_profile_file # noqa: F401
 from . import request_retry         # noqa: F401
+
+
+================================================================================
+FILE: C:\projects\aiAgency\core\ai_client\ai_response_parser.py
+================================================================================
+
+# core/ai_client/ai_response_parser.py
+import json
+from typing import Any, Dict
+
+
+class AIResponseParser:
+    """
+    Extracts structured data (like 'agent' and 'actions') from AI responses.
+
+    Expected OpenAI response shape (chat/completions):
+
+    {
+      "choices": [
+        {
+          "message": {
+            "role": "assistant",
+            "content": <string or dict or list>
+          }
+        }
+      ],
+      ...
+    }
+
+    When using response_format = { "type": "json_object" }, the content may be:
+    - a JSON string ("{ ... }")
+    - or already a dict ({ ... })
+    """
+
+    # ------------------------------------------------------------------ #
+    # Core parsing helper
+    # ------------------------------------------------------------------ #
+    @staticmethod
+    def _content_dict(response: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Safely parse message content into a dict. Returns {} on failure.
+
+        Handles:
+        - content as JSON string
+        - content as already-parsed dict
+        - content as list with a single JSON string or dict
+        """
+        try:
+            message = response["choices"][0]["message"]
+            content = message.get("content")
+        except (KeyError, TypeError):
+            return {}
+
+        # Case 1: already a dict
+        if isinstance(content, dict):
+            return content
+
+        # Case 2: JSON string
+        if isinstance(content, str):
+            try:
+                return json.loads(content)
+            except json.JSONDecodeError:
+                # Not valid JSON, give up
+                return {}
+
+        # Case 3: list of parts (future-proofing; try first element)
+        if isinstance(content, list) and content:
+            first = content[0]
+
+            # If first is dict and already looks like the JSON envelope
+            if isinstance(first, dict) and "agent" in first:
+                return first
+
+            # If first has 'text' or 'value', try to JSON-load that
+            if isinstance(first, dict):
+                text_val = first.get("text") or first.get("value")
+                if isinstance(text_val, str):
+                    try:
+                        return json.loads(text_val)
+                    except json.JSONDecodeError:
+                        return {}
+
+        # Anything else we don't recognize
+        return {}
+
+    # ------------------------------------------------------------------ #
+    # Agent/actions helpers
+    # ------------------------------------------------------------------ #
+    @classmethod
+    def extract_agent(cls, response: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Extract the 'agent' object from the response JSON.
+
+        Expected shape in the model output:
+
+        {
+          "agent": {
+            "name": "code_pipeline",
+            "version": "v1",
+            "actions": [ ... ]
+          }
+        }
+
+        Returns {} if the 'agent' key is missing or invalid.
+        """
+        data = cls._content_dict(response)
+        agent = data.get("agent", {})
+        return agent if isinstance(agent, dict) else {}
+
+    @classmethod
+    def extract_actions(cls, response: Dict[str, Any]) -> list[dict]:
+        """
+        Convenience helper: return agent.actions[] as a list.
+        Empty list if agent or actions is missing/invalid.
+        """
+        agent = cls.extract_agent(response)
+        actions = agent.get("actions", [])
+        return actions if isinstance(actions, list) else []
 
 
 
 ================================================================================
-FILE: C:\projects\aiAgency\core\ai_client\ai_client.py
+FILE: C:\projects\aiAgency\core\ai_client\openai_client.py
 ================================================================================
 
 import requests
@@ -1332,458 +1240,6 @@ class OpenAIClient:
             raise Exception(f"OpenAI API error {response.status_code}: {response.text}")
 
         return response.json()
-
-
-
-================================================================================
-FILE: C:\projects\aiAgency\core\ai_client\ai_profile_loader.py
-================================================================================
-
-from __future__ import annotations
-
-import json
-from pathlib import Path
-from typing import Any, Dict, Mapping, Optional
-import copy
-
-
-class AIProfileLoader:
-    """
-    Loads JSON preset profiles from a directory and provides them as dictionaries.
-
-    Features:
-    - Loads all *.json files from a directory.
-    - Each file may contain:
-        A) a single profile object  (with keys like 'model', 'messages', etc.), or
-        B) a mapping of multiple profiles, e.g. { "fast_chat": {...}, "code_generation": {...} }.
-    - Uses the JSON 'name' field or filename stem (case A), or the dict key (case B) as profile name.
-    - Applies simple placeholder substitution (e.g. ${default_user}).
-    - Caches loaded profiles in-memory.
-    """
-
-    def __init__(
-        self,
-        profiles_dir: str | Path,
-        default_user: str = "onat",
-        extra_placeholders: Optional[Mapping[str, str]] = None,
-        encoding: str = "utf-8",
-    ) -> None:
-        self.profiles_dir = Path(profiles_dir)
-        self.encoding = encoding
-
-        # Placeholder map, e.g. {"${default_user}": "onat"}
-        placeholder_map: Dict[str, str] = {
-            "${default_user}": default_user,
-        }
-        if extra_placeholders:
-            placeholder_map.update(extra_placeholders)
-
-        self._placeholder_map = placeholder_map
-
-        self._profiles: Dict[str, Dict[str, Any]] = {}
-        self._loaded: bool = False
-
-    # ------------------------------------------------------------------ #
-    # Public API
-    # ------------------------------------------------------------------ #
-    def load_profiles(self, force_reload: bool = False) -> Dict[str, Dict[str, Any]]:
-        """
-        Load all JSON profiles from profiles_dir into memory.
-
-        Returns a mapping:
-            { profile_name: profile_dict }
-        """
-        if self._loaded and not force_reload:
-            return copy.deepcopy(self._profiles)
-
-        if not self.profiles_dir.exists():
-            raise FileNotFoundError(
-                f"Profiles directory does not exist: {self.profiles_dir}"
-            )
-
-        loaded: Dict[str, Dict[str, Any]] = {}
-
-        for path in sorted(self.profiles_dir.glob("*.json")):
-            with path.open("r", encoding=self.encoding) as f:
-                raw = json.load(f)
-
-            # Case A: file holds a single profile dict at the top level.
-            # We treat it as a profile if it looks like a payload: has 'model' or 'messages'
-            # or explicitly defines 'name'.
-            if isinstance(raw, dict) and (
-                "model" in raw or "messages" in raw or "name" in raw
-            ):
-                profile_name = raw.get("name") or path.stem
-                processed = self._apply_placeholders(raw)
-                loaded[profile_name] = processed
-                continue
-
-            # Case B: file holds multiple profiles in a mapping:
-            # { "fast_chat": {...}, "code_generation": {...} }
-            if isinstance(raw, dict):
-                for profile_name, profile_body in raw.items():
-                    if not isinstance(profile_body, dict):
-                        # Skip non-dict items silently; they are not valid profiles.
-                        continue
-                    processed = self._apply_placeholders(profile_body)
-                    loaded[profile_name] = processed
-                continue
-
-            # Anything else is considered invalid.
-            raise ValueError(
-                f"Unsupported JSON structure in profile file: {path}. "
-                "Expected a dict representing a single profile or a dict of profiles."
-            )
-
-        self._profiles = loaded
-        self._loaded = True
-
-        return copy.deepcopy(self._profiles)
-
-    def get_profile(self, name: str) -> Dict[str, Any]:
-        """
-        Return a single profile by name.
-
-        Raises KeyError if not found.
-        """
-        if not self._loaded:
-            self.load_profiles()
-
-        try:
-            return copy.deepcopy(self._profiles[name])
-        except KeyError as exc:
-            known = ", ".join(sorted(self._profiles)) or "<none>"
-            raise KeyError(
-                f"Unknown profile '{name}'. Known profiles: {known}"
-            ) from exc
-
-    def get_all_profiles(self) -> Dict[str, Dict[str, Any]]:
-        """
-        Convenience: return all loaded profiles.
-        """
-        if not self._loaded:
-            self.load_profiles()
-        return copy.deepcopy(self._profiles)
-
-    # ------------------------------------------------------------------ #
-    # Internal helpers
-    # ------------------------------------------------------------------ #
-    def _apply_placeholders(self, obj: Any) -> Any:
-        """
-        Recursively apply string placeholder substitution on a JSON-like object.
-        """
-        if isinstance(obj, dict):
-            return {k: self._apply_placeholders(v) for k, v in obj.items()}
-        if isinstance(obj, list):
-            return [self._apply_placeholders(v) for v in obj]
-        if isinstance(obj, str):
-            return self._replace_in_string(obj)
-        return obj
-
-    def _replace_in_string(self, value: str) -> str:
-        """
-        Replace occurrences of ${...} placeholders in a string.
-        """
-        result = value
-        for placeholder, replacement in self._placeholder_map.items():
-            if placeholder in result:
-                result = result.replace(placeholder, replacement)
-        return result
-
-
-
-================================================================================
-FILE: C:\projects\aiAgency\core\ai_client\ai_response_parser.py
-================================================================================
-
-# core/ai_client/ai_response_parser.py
-import json
-from typing import Any, Dict
-
-
-class AIResponseParser:
-    """
-    Extracts structured data (like 'code', 'context', or 'agent') from AI responses.
-
-    Expected OpenAI response shape (chat/completions):
-
-    {
-      "choices": [
-        {
-          "message": {
-            "role": "assistant",
-            "content": <string or dict or list>
-          }
-        }
-      ],
-      ...
-    }
-
-    When using response_format = { "type": "json_object" }, the content may be:
-    - a JSON string (\"{ ... }\")
-    - or already a dict ( { ... } )
-    """
-
-    # ------------------------------------------------------------------ #
-    # Core parsing helper
-    # ------------------------------------------------------------------ #
-    @staticmethod
-    def _content_dict(response: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Safely parse message content into a dict. Returns {} on failure.
-
-        Handles:
-        - content as JSON string
-        - content as already-parsed dict
-        - content as list with a single JSON string or dict
-        """
-        try:
-            message = response["choices"][0]["message"]
-            content = message.get("content")
-        except (KeyError, TypeError):
-            return {}
-
-        # Case 1: already a dict
-        if isinstance(content, dict):
-            return content
-
-        # Case 2: JSON string
-        if isinstance(content, str):
-            try:
-                return json.loads(content)
-            except json.JSONDecodeError:
-                # Not valid JSON, give up
-                return {}
-
-        # Case 3: list of parts (future-proofing; try first element)
-        if isinstance(content, list) and content:
-            first = content[0]
-            # If first is dict and looks like JSON already
-            if isinstance(first, dict) and "agent" in first:
-                return first
-            # If first has 'text' or 'value' we can try to load
-            if isinstance(first, dict):
-                text_val = first.get("text") or first.get("value")
-                if isinstance(text_val, str):
-                    try:
-                        return json.loads(text_val)
-                    except json.JSONDecodeError:
-                        return {}
-
-        # Anything else we don't recognize
-        return {}
-
-    # ------------------------------------------------------------------ #
-    # Legacy code/context helpers
-    # ------------------------------------------------------------------ #
-    @classmethod
-    def extract_code(cls, response: Dict[str, Any]) -> str:
-        data = cls._content_dict(response)
-        val = data.get("code", "")
-        return val if isinstance(val, str) else ""
-
-    @classmethod
-    def extract_context(cls, response: Dict[str, Any]) -> str:
-        data = cls._content_dict(response)
-        val = data.get("context", "")
-        return val if isinstance(val, str) else ""
-
-    @classmethod
-    def extract(cls, response: Dict[str, Any]) -> Dict[str, str]:
-        """
-        Legacy combined extractor for code + context.
-        Returns: {"code": str, "context": str}
-        """
-        data = cls._content_dict(response)
-        code = data.get("code", "")
-        context = data.get("context", "")
-        return {
-            "code": code if isinstance(code, str) else "",
-            "context": context if isinstance(context, str) else "",
-        }
-
-    # ------------------------------------------------------------------ #
-    # New: agent/actions helpers
-    # ------------------------------------------------------------------ #
-    @classmethod
-    def extract_agent(cls, response: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Extract the 'agent' object from the response JSON.
-
-        Expected shape in the model output:
-
-        {
-          "agent": {
-            "name": "code_pipeline",
-            "version": "v1",
-            "actions": [ ... ]
-          }
-        }
-
-        Returns {} if the 'agent' key is missing or invalid.
-        """
-        data = cls._content_dict(response)
-        agent = data.get("agent", {})
-        return agent if isinstance(agent, dict) else {}
-
-    @classmethod
-    def extract_actions(cls, response: Dict[str, Any]) -> list[dict]:
-        """
-        Convenience helper: return agent.actions[] as a list.
-        Empty list if agent or actions is missing/invalid.
-        """
-        agent = cls.extract_agent(response)
-        actions = agent.get("actions", [])
-        return actions if isinstance(actions, list) else []
-
-
-
-================================================================================
-FILE: C:\projects\aiAgency\core\ai_client\api_param_generator.py
-================================================================================
-
-# === CONTEXT START ===
-# Added logging to the AIParamGenerator class using BasicLogger. A logger instance
-# is created in the __init__ method, and minimal logging is added to the
-# build_params and send methods to log important actions.
-# === CONTEXT END ===
-
-from __future__ import annotations
-
-from typing import Any, Dict, Mapping, MutableMapping, Optional
-import copy
-from core.logger import BasicLogger
-
-
-class AIParamGenerator:
-    """
-    Builds ready-to-send payloads for OpenAI's /v1/chat/completions
-    and dispatches them using an injected OpenAIClient-compatible instance.
-
-    Presets are provided externally (e.g. from JSON via AIProfileLoader).
-
-    Expected shape of a preset (minimal):
-
-    {
-        "model": "gpt-5-turbo",
-        "temperature": 0,
-        "max_output_tokens": 1200,
-        "response_format": {...},   # optional
-        "messages": [...],          # optional, can be overridden
-        "metadata": {...},          # optional
-        "user": "onat"              # optional, default_user is filled if missing
-    }
-
-    The actual keys can be any valid /v1/chat/completions payload parameters.
-    """
-
-    def __init__(
-        self,
-        client: Any,
-        presets: Mapping[str, Mapping[str, Any]],
-        default_user: str = "onat",
-    ) -> None:
-        self.logger = BasicLogger(self.__class__.__name__).get_logger()
-        self.client = client
-        self.default_user = default_user
-        self._presets: Dict[str, Dict[str, Any]] = {
-            name: dict(value) for name, value in presets.items()
-        }
-
-    # ------------------------------------------------------------------ #
-    # Preset management
-    # ------------------------------------------------------------------ #
-    def set_presets(self, presets: Mapping[str, Mapping[str, Any]]) -> None:
-        """
-        Replace the internal preset mapping at runtime.
-        """
-        self._presets = {name: dict(value) for name, value in presets.items()}
-
-    def get_preset_names(self) -> tuple[str, ...]:
-        """
-        Return tuple of known preset names.
-        """
-        return tuple(sorted(self._presets))
-
-    def _get_base_preset(self, name: str) -> Dict[str, Any]:
-        try:
-            return copy.deepcopy(self._presets[name])
-        except KeyError as exc:
-            known = ", ".join(sorted(self._presets)) or "<none>"
-            raise KeyError(
-                f"Unknown preset '{name}'. Known presets: {known}"
-            ) from exc
-
-    # ------------------------------------------------------------------ #
-    # Core API
-    # ------------------------------------------------------------------ #
-    def build_params(
-        self,
-        preset_name: str,
-        overrides: Optional[Mapping[str, Any]] = None,
-    ) -> Dict[str, Any]:
-        """
-        Build a chat/completions payload from a preset, applying overrides.
-
-        - Deep-merges overrides into the base preset.
-        - Ensures 'user' key is present (using default_user) if missing.
-        """
-        self.logger.info(f"Building parameters for preset: {preset_name}")
-        params = self._get_base_preset(preset_name)
-
-        if overrides:
-            self._deep_merge(params, overrides)
-
-        if "user" not in params and self.default_user:
-            params["user"] = self.default_user
-
-        return params
-
-    def send(
-        self,
-        preset_name: str,
-        overrides: Optional[Mapping[str, Any]] = None,
-    ) -> Any:
-        """
-        Build params and dispatch the request via the injected client.
-
-        The client is expected to expose a method compatible with:
-            client.post_chat_completions(payload: dict) -> dict
-        Adjust this call to match your real OpenAIClient interface.
-        """
-        self.logger.info(f"Sending request for preset: {preset_name}")
-        payload = self.build_params(preset_name, overrides=overrides)
-
-        # ðŸ”§ Adjust this to your real client API:
-        # e.g. self.client.create_chat_completion(**payload)
-        # or    self.client.post("chat/completions", json=payload)
-        return self.client.post_chat_completions(payload)
-
-    # ------------------------------------------------------------------ #
-    # Utilities
-    # ------------------------------------------------------------------ #
-    @classmethod
-    def _deep_merge(
-        cls,
-        target: MutableMapping[str, Any],
-        updates: Mapping[str, Any],
-    ) -> None:
-        """
-        In-place deep merge of 'updates' into 'target'.
-
-        - Dict values are merged recursively.
-        - Non-dict values overwrite.
-        - Lists are overwritten by default (you can customize if needed).
-        """
-        for key, value in updates.items():
-            if (
-                key in target
-                and isinstance(target[key], dict)
-                and isinstance(value, Mapping)
-            ):
-                cls._deep_merge(target[key], value)
-            else:
-                target[key] = copy.deepcopy(value)
 
 
 
@@ -1933,12 +1389,9 @@ class RunConfig:
             if not isinstance(item, dict):
                 raise ValueError(f"Run #{idx} must be an object, got: {type(item)}")
 
-            # Detect "new style" runs: driven by context_file/target_file
             has_context = "context_file" in item or "context_files" in item
 
             if has_context:
-                # NEW MODE: context_file + target_file + task_description
-                # profile_name/class_name become optional/logging-only.
                 profile_name = _get_field(
                     item,
                     "profile_name",
@@ -1973,13 +1426,12 @@ class RunConfig:
                 target_file = str(item.get("target_file", ""))
 
             else:
-                # OLD MODE: profile_name/class_name/task_description required
                 profile_name = _get_field(item, "profile_name", required=True)
                 class_name = _get_field(item, "class_name", required=True)
                 task_description = _get_field(item, "task_description", required=True)
 
-                context_file = []   # none in old mode
-                target_file = ""    # none in old mode
+                context_file = []   
+                target_file = ""    
 
             # Optional fields from the run JSON
             rules = item.get("rules", [])
@@ -2110,51 +1562,6 @@ FILE: C:\projects\aiAgency\core\context\__init__.py
 
 
 ================================================================================
-FILE: C:\projects\aiAgency\core\files\class_reader.py
-================================================================================
-
-# === CONTEXT START ===
-# The PythonFileReader class provides a simple and reliable utility for loading
-# Python source files from disk and returning their contents as a raw string.
-# It ensures that the requested file actually exists and validates that the
-# target is a .py file before attempting to read it.
-#
-# This class is used by the AI-driven development framework when existing Python
-# files need to be ingested, analyzed, or passed back to the model for
-# refactoring. By centralizing file reading logic, the codebase avoids repetitive
-# I/O operations throughout different components and maintains consistent error
-# handling for missing or invalid file paths.
-#
-# The implementation intentionally avoids any post-processing or parsing of the
-# file's content. It returns the exact text of the file as-is, preserving
-# formatting, comments, and structure so that downstream processes — such as
-# code generation, diffing, or context injection — receive the full and accurate
-# representation of the original source.
-# === CONTEXT END ===
-
-
-import os
-
-class PythonFileReader:
-    def __init__(self, file_path):
-        self.file_path = file_path
-
-    def read_file(self):
-        if not os.path.isfile(self.file_path):
-            raise FileNotFoundError(f"The file {self.file_path} does not exist.")
-        if not self.file_path.endswith('.py'):
-            raise ValueError("The file is not a Python (.py) file.")
-        with open(self.file_path, 'r') as file:
-            return file.read()
-
-# Example usage:
-# reader = PythonFileReader('example.py')
-# code_string = reader.read_file()
-# print(code_string)
-
-
-
-================================================================================
 FILE: C:\projects\aiAgency\core\files\file_writer.py
 ================================================================================
 
@@ -2206,14 +1613,6 @@ FILE: C:\projects\aiAgency\core\files\__init__.py
 FILE: C:\projects\aiAgency\core\git\commit_message_builder.py
 ================================================================================
 
-# === CONTEXT START ===
-# The CommitMessageBuilder class is designed to create standardized commit
-# messages for version control systems. It includes a static method 'build' that
-# constructs a commit message using the file name, a short description, a detailed
-# context, and the author's name. This utility can be used to ensure consistency
-# in commit messages across a project.
-# === CONTEXT END ===
-
 class CommitMessageBuilder:
     """
     A utility class to build commit messages for version control.
@@ -2239,11 +1638,6 @@ class CommitMessageBuilder:
 ================================================================================
 FILE: C:\projects\aiAgency\core\git\git_client.py
 ================================================================================
-
-# === CONTEXT START ===
-# Added logging to the GitClient class using BasicLogger. Each method now logs its
-# main action, providing traceability for operations performed by the class.
-# === CONTEXT END ===
 
 import subprocess
 from typing import Union
@@ -2330,13 +1724,6 @@ class GitClient:
 FILE: C:\projects\aiAgency\core\git\git_manager.py
 ================================================================================
 
-# core/git/git_manager.py
-
-# === CONTEXT START ===
-# The GitManager class provides a higher-level orchestration layer for handling
-# version-control operations within the AI-driven code-generation workflow.
-# === CONTEXT END ===
-
 from typing import Optional
 from core.git.git_client import GitClient  # adjust path if different
 
@@ -2385,13 +1772,6 @@ class GitManager:
 FILE: C:\projects\aiAgency\core\git\repo_config.py
 ================================================================================
 
-# === CONTEXT START ===
-# This code defines a Python data class named RepoConfig using the @dataclass
-# decorator. It includes type hints for each field and a class-level docstring
-# that describes the purpose of the class and its attributes. Default values are
-# provided for all fields except repo_path.
-# === CONTEXT END ===
-
 from dataclasses import dataclass
 
 @dataclass
@@ -2425,25 +1805,19 @@ import json
 from typing import Any, Dict, List, Optional
 
 from core.config.run_config import RunItem
-from core.files.class_reader import PythonFileReader
-
-
-from typing import Any, Dict, List, Optional
-
-from core.config.run_config import RunItem
 
 
 def build_agent_input(
     run_item: RunItem,
     profile_name: str,
     class_name: Optional[str],
-    base_agent_input: Dict[str, Any],
+    base_agent_input: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """Construct the agent_input object passed into the model.
 
     This combines:
     - static runtime info (profile_name, class_name)
-    - per-run agent_input overrides from the config
+    - per-run agent_input overrides from the profile/run
     - the target_file path if present
     """
     agent_input_obj: Dict[str, Any] = {
@@ -2451,7 +1825,6 @@ def build_agent_input(
         "class_name": class_name or None,
     }
 
-    # Merge any extra agent_input passed from the run (optional)
     if isinstance(base_agent_input, dict) and base_agent_input:
         agent_input_obj.update(base_agent_input)
 
@@ -2461,12 +1834,11 @@ def build_agent_input(
     return agent_input_obj
 
 
-
 def build_rules_block_for_run(run_item: RunItem) -> str:
     """Build a markdown-style rules block string for this run.
 
     - Uses per-run rules from runs.json (run_item.rules).
-    - Optionally defines a few global rules in base_rules.
+    - Adds a small set of global rules.
     - Deduplicates while preserving order.
     """
     base_rules: List[str] = [
@@ -2543,7 +1915,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from core.logger import BasicLogger
-from core.ai_client.ai_client import OpenAIClient
+from core.ai_client.openai_client import OpenAIClient
 from core.ai_client.ai_response_parser import AIResponseParser
 from core.files.file_writer import FileWriter
 from core.actions.registry import ActionRegistry
@@ -2573,7 +1945,7 @@ class ActionRuntimeContext(ActionContext):
     """Concrete runtime context passed to actions.
 
     Extends ActionContext with additional fields used by specific actions and
-    by the orchestrator (e.g. retry flags).
+    by the orchestrator (e.g. retry flags, enforced target file).
     """
 
     target_file: Optional[str] = None
@@ -2582,7 +1954,12 @@ class ActionRuntimeContext(ActionContext):
 
 
 def execute_actions(actions_list: List[Dict[str, Any]], ctx: ActionRuntimeContext) -> None:
-    """Instantiate and execute actions using the registry."""
+    """Instantiate and execute actions using the registry.
+
+    Enforces the invariant:
+    - If ctx.target_file is set and an action is 'file_write', its path is overridden by ctx.target_file.
+    - If ctx.target_file is empty/None and an action is 'file_write', that action is skipped.
+    """
     logger = ctx.logger
 
     for index, raw in enumerate(actions_list, start=1):
@@ -2600,6 +1977,19 @@ def execute_actions(actions_list: List[Dict[str, Any]], ctx: ActionRuntimeContex
                 "Invalid params for action '%s': %r", action.action_type, raw
             )
             continue
+
+        # Enforce target_file contract for file_write actions
+        if action.action_type == "file_write":
+            if not ctx.target_file:
+                logger.warning(
+                    "Skipping file_write action #%s: run has no target_file set.",
+                    index,
+                )
+                continue
+
+            # Override any model-provided path; run.target_file is the single source of truth
+            if hasattr(action, "params") and isinstance(action.params, dict):
+                action.params["target_path"] = ctx.target_file
 
         logger.info("Executing action #%s: %s", index, action.action_type)
         action.execute(ctx)
@@ -2656,7 +2046,6 @@ class AppRunner:
         task_description: str,
         agent_input_overrides: Dict[str, Any],
     ) -> RunResult:
-
         """Execute a single model call + actions for the given run.
 
         `run_params` must already be a valid OpenAI payload (model, messages, ...).
@@ -2665,6 +2054,7 @@ class AppRunner:
         logger = self.logger
         logger.info("Starting AppRunner for profile '%s'", profile_name)
 
+        # For logging: which context files were actually used for this run
         context_files_display = run_params.pop("_context_files_display", None)
         if context_files_display:
             logger.info("Using context files: %s", context_files_display)
@@ -2676,7 +2066,6 @@ class AppRunner:
             class_name=class_name,
             base_agent_input=agent_input_overrides,
         )
-
 
         rules_block = build_rules_block_for_run(run_item)
         context_block = run_params.pop("_context_block", "")
@@ -2744,7 +2133,7 @@ class AppRunner:
             )
             return RunResult(success=False, retry_requested=False)
 
-        # Execute actions
+        # Execute actions with runtime context including enforced target_file
         runtime_ctx = ActionRuntimeContext(
             project_root=self.project_root,
             file_writer=self.file_writer,
@@ -2769,6 +2158,136 @@ class AppRunner:
             )
 
         return RunResult(success=True, retry_requested=False)
+
+
+
+================================================================================
+FILE: C:\projects\aiAgency\core\runtime\pipeline_runner.py
+================================================================================
+
+# core/runtime/pipeline_runner.py
+from __future__ import annotations
+
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Optional
+
+from core.config.run_config import RunConfig, RunItem
+from core.runtime.run_executor import RunExecutor
+
+
+@dataclass
+class PipelineResult:
+    """Optional container for aggregated pipeline status."""
+    total_runs: int
+    succeeded: int
+    failed: int
+    pipeline_retried: bool
+
+
+class PipelineRunner:
+    """
+    Orchestrates execution of a RunConfig through RunExecutor.
+
+    Responsibilities:
+    - Iterate over all runs
+    - Handle pipeline-level retry_from logic
+    - Decide when to restart and from which index
+    - Report basic status to stdout
+    """
+
+    def __init__(self, project_root: Path, config: RunConfig) -> None:
+        self.project_root = project_root
+        self.config = config
+        self.executor = RunExecutor(project_root=project_root)
+
+        self.total_runs = len(config.runs)
+
+        retry_from: Optional[int] = getattr(config, "retry_from", None)
+        if retry_from is not None:
+            # clamp into [1, total_runs]
+            retry_from = max(1, min(retry_from, self.total_runs))
+        self.retry_from: Optional[int] = retry_from
+
+    def run(self) -> PipelineResult:
+        idx = 1  # 1-based index for human-readable logs
+        pipeline_retried = False
+        restart_from_index: Optional[int] = None
+
+        succeeded = 0
+        failed = 0
+
+        while idx <= self.total_runs:
+            run: RunItem = self.config.runs[idx - 1]
+
+            # If we just restarted from a specific index, the *first* run
+            # after restart should use retry_context_files instead of the
+            # original context_file.
+            use_retry_ctx_first = restart_from_index is not None and idx == restart_from_index
+
+            # Consume the flag so it applies only once.
+            if use_retry_ctx_first:
+                restart_from_index = None
+
+            result = self.executor.execute(
+                run=run,
+                run_index=idx,
+                use_retry_context_on_first_attempt=use_retry_ctx_first,
+            )
+
+            status = "OK" if result.success else "FAILED"
+            if result.retried:
+                print(
+                    f"[RUN {idx}] finished with status {status} "
+                    f"after {result.attempts} attempts. "
+                    f"Retry reason (last): {result.last_retry_reason or '<none>'}."
+                )
+            else:
+                print(
+                    f"[RUN {idx}] finished with status {status} "
+                    f"after {result.attempts} attempts."
+                )
+
+            if result.success:
+                succeeded += 1
+            else:
+                failed += 1
+
+            # Pipeline-level retry_from logic:
+            #
+            # If:
+            #   - this run did NOT succeed,
+            #   - the RunExecutor reports that the agent requested retry
+            #     at some point (result.retried == True), and
+            #   - the config defines retry_from,
+            #   - and we have not yet used the pipeline-level restart,
+            # then:
+            #   - restart the pipeline from retry_from,
+            #   - and for that first restarted run, force use of retry_context_files.
+            if (
+                not result.success
+                and result.retried
+                and self.retry_from is not None
+                and not pipeline_retried
+            ):
+                print(
+                    f"[RUN {idx}] pipeline-level retry_from triggered; "
+                    f"restarting from run index {self.retry_from} "
+                    f"using retry_context_files for that run (if configured)."
+                )
+                pipeline_retried = True
+                restart_from_index = self.retry_from
+                idx = self.retry_from
+                continue
+
+            idx += 1
+
+        return PipelineResult(
+            total_runs=self.total_runs,
+            succeeded=succeeded,
+            failed=failed,
+            pipeline_retried=pipeline_retried,
+        )
 
 
 
@@ -2956,75 +2475,6 @@ class RunExecutor:
 FILE: C:\projects\aiAgency\core\runtime\__init__.py
 ================================================================================
 
-
-
-
-================================================================================
-FILE: C:\projects\aiAgency\core\utils\file_index_generator.py
-================================================================================
-
-# === CONTEXT START ===
-# Class that scans a base directory and builds a universal file index for all
-# files, excluding only files named .gitignore.
-# === CONTEXT END ===
-
-from pathlib import Path
-from typing import Union, Dict, Any
-
-class FileIndexGenerator:
-    def __init__(self, base_directory: Union[str, Path]):
-        self.base_directory = Path(base_directory)
-
-    def build_index(self) -> Dict[str, Any]:
-        if not self.base_directory.exists():
-            return {"files": []}
-
-        files = []
-        for file in self.base_directory.rglob('*'):
-            if file.is_file() and file.name != '.gitignore':
-                try:
-                    files.append({
-                        "name": file.name,
-                        "relative_path": str(file.relative_to(self.base_directory)),
-                        "absolute_path": str(file.resolve()),
-                        "extension": file.suffix,
-                        "size": file.stat().st_size
-                    })
-                except (OSError, PermissionError):
-                    continue
-
-        files.sort(key=lambda x: x["relative_path"])
-        return {"files": files}
-
-
-
-================================================================================
-FILE: C:\projects\aiAgency\core\utils\generate_path_index.py
-================================================================================
-
-# === CONTEXT START ===
-# Class that generates a path index for all files in a given directory, excluding
-# files listed in .gitignore, and saves the index to a JSON file.
-# === CONTEXT END ===
-
-class PathIndexGenerator:
-    def __init__(self, base_path):
-        self.base_path = base_path
-        self.index = {}
-
-    def generate_index(self):
-        import os
-        for root, dirs, files in os.walk(self.base_path):
-            for file in files:
-                if file != '.gitignore':
-                    file_path = os.path.join(root, file)
-                    self.index[file_path] = os.path.getsize(file_path)
-        return self.index
-
-    def save_index(self, output_file):
-        import json
-        with open(output_file, 'w') as f:
-            json.dump(self.index, f, indent=4)
 
 
 

@@ -1,3 +1,12 @@
+# === CONTEXT START ===
+# This module defines the GitClient class, which provides methods to interact
+# with a Git repository. It includes functionalities to initialize a repository,
+# add files, commit changes, push to a remote, pull from a remote, checkout
+# branches, and get the current branch status. The refactoring removes the
+# hardcoded 'master' branch default, allowing for a more flexible branch
+# handling by defaulting to 'main' if no branch is specified.
+# === CONTEXT END ===
+
 import subprocess
 from typing import Union
 from core.logger import BasicLogger

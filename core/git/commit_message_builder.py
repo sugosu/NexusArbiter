@@ -1,11 +1,3 @@
-# === CONTEXT START ===
-# The CommitMessageBuilder class is designed to create standardized commit
-# messages for version control systems. It includes a static method 'build' that
-# constructs a commit message using the file name, a short description, a detailed
-# context, and the author's name. This utility can be used to ensure consistency
-# in commit messages across a project.
-# === CONTEXT END ===
-
 class CommitMessageBuilder:
     """
     A utility class to build commit messages for version control.

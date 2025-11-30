@@ -1,12 +1,4 @@
 # core/actions/request_retry.py
-
-# === CONTEXT START ===
-# Action that allows an agent to explicitly request a retry of the current run.
-# It does not perform any side effects on disk or Git; it only sets flags on the
-# ActionRuntimeContext so the orchestrator (main.py) can decide whether to
-# repeat this run.
-# === CONTEXT END ===
-
 from typing import Optional
 
 from .base_action import BaseAction, ActionContext

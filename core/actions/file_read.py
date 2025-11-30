@@ -2,7 +2,6 @@
 from pathlib import Path
 from .base_action import BaseAction, ActionContext
 from .registry import ActionRegistry
-from core.files.class_reader import PythonFileReader
 
 
 class FileReadAction(BaseAction):

@@ -133,12 +133,9 @@ class RunConfig:
             if not isinstance(item, dict):
                 raise ValueError(f"Run #{idx} must be an object, got: {type(item)}")
 
-            # Detect "new style" runs: driven by context_file/target_file
             has_context = "context_file" in item or "context_files" in item
 
             if has_context:
-                # NEW MODE: context_file + target_file + task_description
-                # profile_name/class_name become optional/logging-only.
                 profile_name = _get_field(
                     item,
                     "profile_name",
@@ -173,13 +170,12 @@ class RunConfig:
                 target_file = str(item.get("target_file", ""))
 
             else:
-                # OLD MODE: profile_name/class_name/task_description required
                 profile_name = _get_field(item, "profile_name", required=True)
                 class_name = _get_field(item, "class_name", required=True)
                 task_description = _get_field(item, "task_description", required=True)
 
-                context_file = []   # none in old mode
-                target_file = ""    # none in old mode
+                context_file = []   
+                target_file = ""    
 
             # Optional fields from the run JSON
             rules = item.get("rules", [])

@@ -1,10 +1,3 @@
-# core/git/git_manager.py
-
-# === CONTEXT START ===
-# The GitManager class provides a higher-level orchestration layer for handling
-# version-control operations within the AI-driven code-generation workflow.
-# === CONTEXT END ===
-
 from typing import Optional
 from core.git.git_client import GitClient  # adjust path if different
 

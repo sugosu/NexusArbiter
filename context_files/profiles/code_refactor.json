@@ -20,7 +20,7 @@
     },
     {
       "role": "user",
-      "content": "REFERENCE FILES (existing code):\n${reference_files_block}"
+      "content": "REFERENCE FILES (existing code):\n${context_block}"
     }
   ],
   "response_format": { "type": "json_object" },

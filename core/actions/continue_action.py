@@ -1,8 +1,3 @@
-# === CONTEXT START ===
-# Action that controls the flow of execution by either continuing (no-op) or
-# breaking (raising an exception) based on the 'should_break' parameter.
-# === CONTEXT END ===
-
 from .base_action import BaseAction
 from .registry import ActionRegistry
 import logging
