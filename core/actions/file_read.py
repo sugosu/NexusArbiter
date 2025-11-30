@@ -3,18 +3,11 @@ from pathlib import Path
 from .base_action import BaseAction, ActionContext
 from .registry import ActionRegistry
 
-
 class FileReadAction(BaseAction):
     """
-    Action that reads a file under project_root and logs that it was read.
-
-    Expected params:
-      - target_path: str (relative to project root)
-
-    NOTE: At the moment this only logs; the pipeline doesn't surface
-    the file content back to the model in the same run.
+    Safely reads a text file from the project.
+    Returns the content so the agent can use it.
     """
-
     action_type = "file_read"
 
     def validate(self) -> bool:
@@ -26,16 +19,38 @@ class FileReadAction(BaseAction):
             ctx.logger.warning(f"[file_read] Invalid params: {self.params!r}")
             return
 
-        target_path: str = self.params["target_path"]
-        full_path = Path(ctx.project_root) / target_path
+        # 1. SECURITY FIX: Prevent Directory Traversal
+        raw_path = self.params["target_path"]
+        # Resolve to absolute path
+        safe_root = Path(ctx.project_root).resolve()
+        requested_path = (safe_root / raw_path).resolve()
 
-        reader = PythonFileReader(str(full_path))
-        content = reader.read_file()
+        # Check if the resolved path is actually inside the project root
+        if not str(requested_path).startswith(str(safe_root)):
+            ctx.logger.error(f"[file_read] SECURITY ALERT: Attempted path traversal to '{raw_path}'")
+            # Return an error message to the agent so it learns not to do this
+            ctx.add_result(f"Error: Access denied. Path '{raw_path}' is outside project root.")
+            return
 
-        ctx.logger.info(
-            f"[file_read] Read file '{full_path}' "
-            f"({len(content)} characters)"
-        )
+        if not requested_path.exists():
+             ctx.logger.error(f"[file_read] File not found: {requested_path}")
+             ctx.add_result(f"Error: File '{raw_path}' does not exist.")
+             return
+
+        # 2. BUG FIX: Use standard Path method (no missing 'PythonFileReader')
+        try:
+            content = requested_path.read_text(encoding='utf-8')
+            
+            # 3. FEATURE FIX: Return content to the agent
+            ctx.logger.info(f"[file_read] Successfully read '{raw_path}' ({len(content)} chars)")
+            
+            # This is crucial for Data Engineering! 
+            # The agent needs to SEE the content to generate the next SQL step.
+            ctx.add_result(f"Content of {raw_path}:\n{content}")
+
+        except Exception as e:
+            ctx.logger.error(f"[file_read] Error reading file: {e}")
+            ctx.add_result(f"Error reading file: {str(e)}")
 
 # Register
 ActionRegistry.register(FileReadAction)
