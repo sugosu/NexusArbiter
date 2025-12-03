@@ -1,4 +1,6 @@
 # core/actions/request_retry.py
+from __future__ import annotations
+
 from typing import Optional
 
 from .base_action import BaseAction, ActionContext
@@ -6,7 +8,8 @@ from .registry import ActionRegistry
 
 
 class RequestRetryAction(BaseAction):
-    """Action used by agents to request that the current run be retried.
+    """
+    Action used by agents to request that the *current run* be retried.
 
     Expected params:
         - reason: Optional[str]  (short explanation logged by the engine)
@@ -22,7 +25,8 @@ class RequestRetryAction(BaseAction):
 
     def execute(self, ctx: ActionContext) -> None:
         # The concrete runtime context (ActionRuntimeContext) has
-        # retry_requested / retry_reason fields.
+        # retry_requested / retry_reason fields. We set them via setattr
+        # to avoid tight coupling.
         setattr(ctx, "retry_requested", True)
         reason: Optional[str] = self.params.get("reason")
         setattr(ctx, "retry_reason", reason)
@@ -36,7 +40,8 @@ class RequestRetryAction(BaseAction):
                 )
             else:
                 logger.info(
-                    "[request_retry] Agent requested retry for this run (no reason provided)."
+                    "[request_retry] Agent requested retry for this run "
+                    "(no reason provided)."
                 )
 
 

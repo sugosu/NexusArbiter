@@ -1,44 +1,33 @@
-from .base_action import BaseAction
+# core/actions/continue_action.py
+from __future__ import annotations
+
+from .base_action import BaseAction, ActionContext
 from .registry import ActionRegistry
-import logging
+
 
 class ContinueAction(BaseAction):
+    """
+    A no-op action indicating that the agent wants to keep iterating
+    without final side effects.
+
+    In the orchestration layer, a *single* 'continue' action is already
+    treated specially and short-circuits without executing any actions.
+    This class exists for completeness and future-proofing in case
+    'continue' ever appears in a mixed action list.
+    """
+
     action_type = "continue"
 
     def validate(self) -> bool:
-        """
-        Validate the parameters for the ContinueAction.
-
-        Returns:
-            bool: True if parameters are valid, False otherwise.
-        """
-        should_break = self.params.get("should_break")
-        reason = self.params.get("reason")
-
-        if not isinstance(should_break, bool):
-            logging.error("Validation failed: 'should_break' must be a boolean.")
-            return False
-
-        if reason is not None and not isinstance(reason, str):
-            logging.error("Validation failed: 'reason' must be a string or None.")
-            return False
-
+        # We deliberately do NOT require any params. If the agent sends
+        # something, we just ignore it.
         return True
 
-    def execute(self, ctx) -> None:
-        """
-        Execute the ContinueAction based on the parameters.
+    def execute(self, ctx: ActionContext) -> None:
+        logger = getattr(ctx, "logger", None)
+        if logger is not None:
+            logger.info("[continue] No-op action executed; nothing to do.")
 
-        Args:
-            ctx: The context in which the action is executed.
-        """
-        should_break = self.params["should_break"]
-        reason = self.params.get("reason", "No reason provided.")
 
-        if should_break:
-            logging.error(f"ContinueAction requested termination: {reason}")
-            raise RuntimeError(f"ContinueAction requested termination: {reason}")
-        else:
-            logging.info("ContinueAction is a no-op. The script will proceed normally.")
-
+# Register
 ActionRegistry.register(ContinueAction)

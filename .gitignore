@@ -20,3 +20,5 @@ venv/
 merge_py.py
 
 *.txt
+
+/logs

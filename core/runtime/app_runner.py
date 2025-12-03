@@ -1,6 +1,7 @@
 # core/runtime/app_runner.py
 from __future__ import annotations
 
+import json
 import os
 from dataclasses import dataclass
 from pathlib import Path
@@ -16,16 +17,28 @@ from core.git.repo_config import RepoConfig
 from core.git.git_client import GitClient
 from core.git.git_manager import GitManager
 from core.config.run_config import RunItem
-from core.prompt.agent_input_builder import (
-    build_agent_input,
-    build_rules_block_for_run,
-    inject_placeholders,
-)
+
+
+def _register_builtin_actions() -> None:
+    """Import all built-in action modules so they self-register.
+
+    Each imported module must call ``ActionRegistry.register(...)`` at import
+    time. This helper is invoked once from :class:`AppRunner`'s constructor.
+    """
+    # Core file / IO actions
+    import core.actions.file_write  # noqa: F401
+    import core.actions.file_read  # noqa: F401
+
+    # Control-flow / meta actions
+    import core.actions.continue_action  # noqa: F401
+    import core.actions.request_retry  # noqa: F401
+    import core.actions.trigger_retry  # noqa: F401
+    import core.actions.break_action  # noqa: F401
 
 
 @dataclass
 class RunResult:
-    """Result of a single model invocation / action execution cycle."""
+    """Result of a single model invocation + action execution."""
 
     success: bool
     retry_requested: bool = False
@@ -36,8 +49,8 @@ class RunResult:
 class ActionRuntimeContext(ActionContext):
     """Concrete runtime context passed to actions.
 
-    Extends ActionContext with additional fields used by specific actions and
-    by the orchestrator (e.g. retry flags, enforced target file).
+    Extends :class:`ActionContext` with additional fields used by the
+    orchestrator (retry flags, enforced target file, etc.).
     """
 
     target_file: Optional[str] = None
@@ -46,11 +59,17 @@ class ActionRuntimeContext(ActionContext):
 
 
 def execute_actions(actions_list: List[Dict[str, Any]], ctx: ActionRuntimeContext) -> None:
-    """Instantiate and execute actions using the registry.
+    """Instantiate and execute actions using :class:`ActionRegistry`.
 
-    Enforces the invariant:
-    - If ctx.target_file is set and an action is 'file_write', its path is overridden by ctx.target_file.
-    - If ctx.target_file is empty/None and an action is 'file_write', that action is skipped.
+    Behaviour:
+
+    * Unknown or unregistered actions are skipped with a warning.
+    * If ``ctx.target_file`` is set and an action is ``file_write``, its
+      path is overridden by ``ctx.target_file``.
+    * If ``ctx.target_file`` is empty/None and an action is ``file_write``,
+      that action is skipped.
+    * If an action of type ``break`` is executed, remaining actions in the
+      list are not executed.
     """
     logger = ctx.logger
 
@@ -79,55 +98,92 @@ def execute_actions(actions_list: List[Dict[str, Any]], ctx: ActionRuntimeContex
                 )
                 continue
 
-            # Override any model-provided path; run.target_file is the single source of truth
+            # Override any model-provided path; run.target_file is the SSoT
             if hasattr(action, "params") and isinstance(action.params, dict):
                 action.params["target_path"] = ctx.target_file
 
         logger.info("Executing action #%s: %s", index, action.action_type)
         action.execute(ctx)
 
+        # Logical break in action sequence
+        if action.action_type == "break":
+            logger.info(
+                "Encountered 'break' action at index %s; stopping further action execution.",
+                index,
+            )
+            break
+
 
 class AppRunner:
-    """High-level orchestrator for one OpenAI call + action execution.
+    """High-level orchestrator for one model call + action execution.
 
     Responsibilities:
-    - Initialize infrastructure (logging, Git, file system, OpenAI client).
-    - Build agent_input and inject it + rules/context into the payload.
-    - Call OpenAI and parse an 'agent' response.
-    - Filter and execute actions via the registry.
-    - Surface success / retry_requested flags to the outer orchestration layer.
+
+    * Initialize infrastructure (logging, Git, filesystem, model client).
+    * Inject task / rules / agent_input / context into the profile payload.
+    * Call the selected provider (currently OpenAI only).
+    * Filter and execute actions via :class:`ActionRegistry`.
+    * Surface ``success`` / ``retry_requested`` flags for retry logic.
     """
 
     def __init__(self, project_root: Path) -> None:
-        self.project_root = project_root
+        self.project_root = Path(project_root)
 
-        self.logger = BasicLogger(__name__).get_logger()
+        self.logger = BasicLogger(self.__class__.__name__).get_logger()
 
-        # Git / repo configuration
-        repo_config = RepoConfig(
-            repo_path=str(project_root),
-            default_branch="master",
-            remote_name="origin",
-            author_name="Onat Agent",
-            author_email="onat@gegeoglu.com",
-        )
-        self.repo_config = repo_config
-        self.git_client = GitClient(repo_path=repo_config.repo_path)
-        self.git_manager = GitManager(git_client=self.git_client)
+        # Repo / Git setup
+        repo_path = os.getenv("AIAGENCY_REPO_PATH", str(self.project_root))
+        self.repo_config = RepoConfig(repo_path=repo_path)
+        self.git_client = GitClient(repo_path=repo_path)
+        # FIX: GitManager currently takes only git_client
+        self.git_manager = GitManager(self.git_client)
 
-        # File writer for side effects
-        self.file_writer = FileWriter(project_root=project_root)
+        # File IO
+        self.file_writer = FileWriter(project_root=self.project_root)
 
-        # OpenAI client
+        # Default provider (used when runs do not specify one)
+        env_default_provider = os.getenv("AIAGENCY_DEFAULT_PROVIDER", "openai")
+        self.default_provider: str = (env_default_provider or "openai").strip().lower()
+        if not self.default_provider:
+            self.default_provider = "openai"
+
+        # OpenAI client (currently the only fully wired provider)
         api_key = os.getenv("OPENAI_API_KEY")
         if not api_key:
-            raise RuntimeError("OPENAI_API_KEY is not set in environment")
+            raise RuntimeError("OPENAI_API_KEY is not set in the environment.")
 
         self.client = OpenAIClient(api_key=api_key)
 
-    # ------------------------------------------------------------------
-    # Public API
-    # ------------------------------------------------------------------
+        # Ensure built-in actions are registered
+        _register_builtin_actions()
+
+
+    # ------------------------------------------------------------------ #
+    # Core run orchestration
+    # ------------------------------------------------------------------ #
+    def _resolve_provider_for_run(self, run_item: RunItem) -> str:
+        """
+        Decide which provider to use for this run.
+
+        Precedence (lowest -> highest):
+        - self.default_provider (from env, default "openai")
+        - run_item.provider (from runs.json)
+
+        For now, only "openai" is implemented. Any other value results in a
+        clear RuntimeError so misconfiguration is caught early.
+        """
+        provider = (run_item.provider or self.default_provider or "openai").strip().lower()
+        if not provider:
+            provider = "openai"
+
+        if provider != "openai":
+            # Placeholder for future multi-provider support.
+            raise RuntimeError(
+                f"Provider '{provider}' is not wired into AppRunner yet. "
+                "Currently only 'openai' is supported."
+            )
+
+        return provider
 
     def run(
         self,
@@ -136,59 +192,142 @@ class AppRunner:
         profile_name: str,
         class_name: Optional[str],
         task_description: str,
-        agent_input_overrides: Dict[str, Any],
+        agent_input_overrides: Optional[Dict[str, Any]] = None,
     ) -> RunResult:
-        """Execute a single model call + actions for the given run.
+        """
+        Execute one model call + follow-up actions for a single run item.
 
-        `run_params` must already be a valid OpenAI payload (model, messages, ...).
-        Any meta key `_context_block` is consumed and injected into prompts.
+        :param run_item:             The RunItem config.
+        :param run_params:           The raw profile JSON loaded from disk
+                                     (or otherwise constructed).
+        :param profile_name:         Logical label for logging (usually the
+                                     profile file path).
+        :param class_name:           Optional class/function name for context.
+        :param task_description:     Human-readable description of the run.
+        :param agent_input_overrides:
+                                     Additional fields that will be merged into
+                                     the agent_input structure for this run.
         """
         logger = self.logger
-        logger.info("Starting AppRunner for profile '%s'", profile_name)
 
-        # For logging: which context files were actually used for this run
-        context_files_display = run_params.pop("_context_files_display", None)
-        if context_files_display:
-            logger.info("Using context files: %s", context_files_display)
+        # ------------------------------------------------------------------ #
+        # 0. Provider selection
+        # ------------------------------------------------------------------ #
+        provider = self._resolve_provider_for_run(run_item)
+        logger.info(
+            "Selected provider '%s' for profile '%s' (class=%r, target_file=%r)",
+            provider,
+            profile_name,
+            class_name,
+            run_item.target_file or "<none>",
+        )
 
-        # Build agent_input, rules, and inject placeholders into messages
+        # ------------------------------------------------------------------ #
+        # 1. Load + enrich profile JSON
+        # ------------------------------------------------------------------ #
+        from core.prompt.agent_input_builder import (
+            build_agent_input,
+            build_rules_block_for_run,
+            inject_placeholders,
+        )
+
+        # Build agent_input based on run + overrides
         agent_input_obj = build_agent_input(
             run_item=run_item,
             profile_name=profile_name,
             class_name=class_name,
-            base_agent_input=agent_input_overrides,
+            base_agent_input=agent_input_overrides or {},
         )
 
+        # Build rules block
         rules_block = build_rules_block_for_run(run_item)
-        context_block = run_params.pop("_context_block", "")
 
+        # Ensure run_params is a dict so we can modify in-place
+        if not isinstance(run_params, dict):
+            raise ValueError("run_params must be a dict loaded from profile JSON")
+
+        # Optional: load + inject context block (based on _context_files_display)
+        context_files_display = run_params.get("_context_files_display", [])
+        if isinstance(context_files_display, List) and context_files_display:
+            # Build a concatenated context string (for debugging/prompting)
+            text_blocks: List[str] = []
+            for rel in context_files_display:
+                try:
+                    full_path = (self.project_root / rel).resolve()
+                    if full_path.is_file():
+                        with full_path.open("r", encoding="utf-8") as f:
+                            raw = f.read()
+                    else:
+                        continue
+                except OSError:
+                    continue
+
+                header = f"=== CONTEXT FILE: {rel} ===\n"
+                text_blocks.append(header + raw.strip() + "\n")
+
+            if text_blocks:
+                context_block = "\n\n".join(text_blocks)
+                run_params["_context_block"] = context_block
+
+        # Remove meta fields before injection
+        if "_context_files_display" in run_params:
+            del run_params["_context_files_display"]
+
+        # Inject placeholders into the model payload
         inject_placeholders(
             run_params=run_params,
             agent_input_obj=agent_input_obj,
             rules_block=rules_block,
             task_description=task_description,
-            target_file=run_item.target_file,
-            context_block=context_block,
+            target_file=run_item.target_file or "",
+            context_block=run_params.get("_context_block", ""),
         )
 
-        # Call OpenAI
-        logger.info("Calling OpenAI for profile '%s'", profile_name)
+        if "_context_block" in run_params:
+            # The context block is injected into messages; no need to keep
+            # it at the top level.
+            del run_params["_context_block"]
+
+        # ------------------------------------------------------------------ #
+        # 2. Call provider (currently OpenAI)
+        # ------------------------------------------------------------------ #
+        logger.info(
+            "Starting model call via provider '%s' for profile '%s'.",
+            provider,
+            profile_name,
+        )
+
+        # For now, provider == "openai" is guaranteed here.
         response = self.client.send_request(body=run_params)
 
-        # Parse agent + actions
-        agent_obj = AIResponseParser.extract_agent(response)
-        if not agent_obj:
-            logger.error("Model did not return a valid 'agent' object. Aborting.")
-            return RunResult(success=False, retry_requested=False)
+        # ------------------------------------------------------------------ #
+        # 3. Extract agent + actions
+        # ------------------------------------------------------------------ #
+        agent = AIResponseParser.extract_agent(response)
+        logger.info("Extracted agent object: %s", json.dumps(agent, indent=2))
 
-        actions = agent_obj.get("actions", [])
-        if not isinstance(actions, list) or not actions:
+        actions = AIResponseParser.extract_actions(response)
+        logger.info("Extracted %d actions.", len(actions))
+
+        if not actions:
             logger.warning("No actions returned by the model.")
             return RunResult(success=False, retry_requested=False)
 
-        # Per-run allowed_actions (from config)
+        # ------------------------------------------------------------------ #
+        # 4. Validate agent / actions shape
+        # ------------------------------------------------------------------ #
+        if not isinstance(agent, dict):
+            logger.warning("Agent is not a dict; raw agent: %r", agent)
+        else:
+            if "name" not in agent or "version" not in agent:
+                logger.warning("Agent object missing 'name' or 'version': %r", agent)
+
+        # ------------------------------------------------------------------ #
+        # 5. Validate and possibly early-return if no actions are available
+        # ------------------------------------------------------------------ #
+        # Enforce per-run allowed_actions against registry membership
         effective_allowed: Optional[List[str]] = None
-        if run_item and run_item.allowed_actions:
+        if getattr(run_item, "allowed_actions", None):
             registered = set(ActionRegistry.allowed_types())
             effective_allowed = [
                 t for t in run_item.allowed_actions if t in registered
@@ -196,10 +335,11 @@ class AppRunner:
             if not effective_allowed:
                 logger.warning(
                     "Run has 'allowed_actions' but none match registered actions; "
-                    "all actions from the model will be rejected."
+                    "all actions from the model will be rejected.",
                 )
+                return RunResult(success=False, retry_requested=False)
 
-        if effective_allowed:
+        if effective_allowed is not None:
             filtered_actions = [
                 a for a in actions if a.get("type") in effective_allowed
             ]
@@ -218,26 +358,33 @@ class AppRunner:
             return RunResult(success=False, retry_requested=False)
 
         # Special case: a single 'continue' action means "no final side effects yet"
+        # Special case: a single 'continue' action
         if len(filtered_actions) == 1 and filtered_actions[0].get("type") == "continue":
             logger.info(
                 "Agent returned only a 'continue' action; "
-                "no side effects will be executed for this attempt."
+                "interpreting this as a successful no-op run.",
             )
-            return RunResult(success=False, retry_requested=False)
+            return RunResult(success=True, retry_requested=False)
 
-        # Execute actions with runtime context including enforced target_file
+
+        # ------------------------------------------------------------------ #
+        # 6. Execute actions with runtime context (including enforced target_file)
+        # ------------------------------------------------------------------ #
         runtime_ctx = ActionRuntimeContext(
             project_root=self.project_root,
             file_writer=self.file_writer,
             git_manager=self.git_manager,
             repo_config=self.repo_config,
             logger=logger,
-            target_file=run_item.target_file,
+            target_file=run_item.target_file or None,
         )
 
         execute_actions(filtered_actions, runtime_ctx)
         logger.info("All actions executed.")
 
+        # ------------------------------------------------------------------ #
+        # 7. Retry semantics
+        # ------------------------------------------------------------------ #
         if runtime_ctx.retry_requested:
             logger.info(
                 "Run requested retry. Reason: %s",

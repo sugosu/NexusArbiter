@@ -1,10 +1,12 @@
 # core/actions/file_write.py
-from pathlib import Path
+from __future__ import annotations
+
 from .base_action import BaseAction, ActionContext
 from .registry import ActionRegistry
 
 
 class FileWriteAction(BaseAction):
+
     action_type = "file_write"
 
     def validate(self) -> bool:
@@ -13,12 +15,13 @@ class FileWriteAction(BaseAction):
 
     def execute(self, ctx: ActionContext) -> None:
         if not self.validate():
-            ctx.logger.warning(f"[file_write] Invalid params: {self.params!r}")
+            ctx.logger.warning("[file_write] Invalid params: %r", self.params)
             return
 
+        # Path suggested by the agent (may be overridden by engine)
         agent_path: str = self.params.get("target_path", "") or ""
 
-        # Engine source of truth
+        # Engine source of truth (ActionRuntimeContext adds target_file)
         effective_path = getattr(ctx, "target_file", None) or agent_path
         if not effective_path:
             ctx.logger.error(
@@ -28,15 +31,18 @@ class FileWriteAction(BaseAction):
             return
 
         code: str = self.params["code"]
+        # Optional, currently unused but kept for future debugging/commits
         _context_text = self.params.get("context", "")
 
         ctx.logger.info(
-            f"[file_write] Writing file '{effective_path}' "
-            f"(ctx.target_file={getattr(ctx, 'target_file', None)!r}, "
-            f"agent_path={agent_path!r})"
+            "[file_write] Writing file '%s' "
+            "(ctx.target_file=%r, agent_path=%r)",
+            effective_path,
+            getattr(ctx, "target_file", None),
+            agent_path,
         )
         written_path = ctx.file_writer.write_file(effective_path, code)
-        ctx.logger.info(f"[file_write] File written at: {written_path}")
+        ctx.logger.info("[file_write] File written at: %s", written_path)
 
 
 # Register with the registry

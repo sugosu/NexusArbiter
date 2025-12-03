@@ -1,0 +1,75 @@
+{
+  "project_name": "MyApp",
+  "language": "python",
+  "version": "1.0.0",
+  "structure": [
+    {
+      "module_name": "user_manager",
+      "file_path": "core/auth/user_manager.py",
+      "description": "Handles user authentication and database interactions.",
+      "imports": [
+        { "source": "typing", "names": ["List", "Optional"], "type": "standard" },
+        { "source": "pydantic", "names": ["BaseModel"], "type": "third_party" },
+        { "source": "core.database", "names": ["db_connection"], "type": "local" }
+      ],
+      "global_constants": [
+        { "name": "MAX_LOGIN_ATTEMPTS", "type": "int", "value": "5" }
+      ],
+      "classes": [
+        {
+          "class_name": "UserManager",
+          "inherits_from": ["BaseService"],
+          "decorators": ["@singleton"],
+          "docstring": "Manages user lifecycle: registration, login, and deletion.",
+          "attributes": [
+            {
+              "name": "db",
+              "type": "DatabaseConnection",
+              "access": "private",
+              "description": "Active connection to the Postgres database."
+            },
+            {
+              "name": "is_authenticated",
+              "type": "bool",
+              "access": "public",
+              "default_value": "False",
+              "description": "Flag tracking the current session state."
+            }
+          ],
+          "methods": [
+            {
+              "name": "__init__",
+              "access": "public",
+              "args": [
+                { "name": "connection_string", "type": "str", "default": "None" }
+              ],
+              "return_type": "None",
+              "description": "Initializes the manager and establishes a DB connection."
+            },
+            {
+              "name": "authenticate_user",
+              "access": "public",
+              "decorators": ["@log_execution"],
+              "args": [
+                { "name": "username", "type": "str" },
+                { "name": "password_hash", "type": "str" }
+              ],
+              "return_type": "bool",
+              "description": "Validates credentials against the stored hash.",
+              "raises": ["AuthError", "TimeoutError"]
+            },
+            {
+              "name": "_encrypt_password",
+              "access": "private",
+              "args": [
+                { "name": "raw_password", "type": "str" }
+              ],
+              "return_type": "str",
+              "description": "Internal helper to hash passwords before storage."
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

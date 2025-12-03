@@ -1,11 +1,21 @@
 {
-  "context_file": ["context_files/profiles/code_generation.json"],
-  "target_file": "test/calculator.py",
+  "provider": "openai",
 
-  "task_description": "Implement a simple calculator module in the target file. Create a Calculator class with methods add(a: float, b: float) -> float, subtract(a: float, b: float) -> float, multiply(a: float, b: float) -> float, and divide(a: float, b: float) -> float. The divide method must handle division by zero gracefully by raising a ValueError with a clear error message. Include concise docstrings for all methods and avoid any I/O or CLI code; this module is purely a reusable library.",
-
-  "agent_input": {
-    "goal": "Generate a reusable Calculator class with basic arithmetic operations in the target file.",
-    "language": "python"
-  }
+  "runs": [
+    {
+      "name": "codegen_1",
+      "profile_file": "context_files/profiles/code_generation.json",
+      "task_description": "Generate module A.",
+      "context_file": ["context_files/manifests/manifest_example.json"],
+      "target_file": "app/module_A.py",
+      "allowed_actions": ["file_write", "continue"]
+    },
+    {
+      "name": "validator_1",
+      "profile_file": "context_files/profiles/validator.json",
+      "task_description": "Validate module A.",
+      "context_file": ["context_files/manifests/manifest_example.json"],
+      "allowed_actions": ["trigger_retry", "continue", "break"]
+    }
+  ]
 }

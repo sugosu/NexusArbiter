@@ -1,5 +1,8 @@
-import requests
+import json
 from typing import Dict, Any, Optional
+
+import requests
+
 from core.logger import BasicLogger
 
 
@@ -35,7 +38,11 @@ class OpenAIClient:
     ):
         self.api_url = api_url
         self.api_key = api_key
-        self.logger = BasicLogger(self.__class__.__name__).get_logger()
+        # JSON logs will go to logs/openai_client.jsonl if you configured BasicLogger that way
+        self.logger = BasicLogger(
+            self.__class__.__name__,
+            log_file="openai_client.jsonl",
+        ).get_logger()
 
     def _sanitize_body(self, body: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -49,7 +56,11 @@ class OpenAIClient:
         removed = [k for k in body.keys() if k not in self._ALLOWED_TOP_LEVEL_KEYS]
         if removed:
             self.logger.info(
-                f"OpenAIClient: stripping meta keys from payload: {', '.join(removed)}"
+                "Stripping meta keys from payload",
+                extra={
+                    "event": "openai_strip_meta_keys",
+                    "removed_keys": removed,
+                },
             )
 
         return sanitized
@@ -70,7 +81,22 @@ class OpenAIClient:
 
         sanitized_body = self._sanitize_body(body)
 
-        self.logger.info("Sending request to OpenAI API")
+        # JSON log (to file) for outgoing request payload
+        self.logger.info(
+            "Outgoing OpenAI API request",
+            extra={
+                "event": "openai_request",
+                "model": sanitized_body.get("model"),
+                "payload": sanitized_body,
+            },
+        )
+
+        # Optional: pretty dump for console
+        self.logger.info(
+            "FULL REQUEST PAYLOAD:\n%s",
+            json.dumps(sanitized_body, indent=2),
+        )
+
         response = requests.post(
             self.api_url,
             json=sanitized_body,
@@ -78,8 +104,35 @@ class OpenAIClient:
             timeout=timeout,
         )
 
-        if response.status_code != 200:
-            self.logger.error(f"OpenAI API error {response.status_code}: {response.text}")
-            raise Exception(f"OpenAI API error {response.status_code}: {response.text}")
+        # Try to parse JSON once so we can both log and return it
+        try:
+            resp_json = response.json()
+        except ValueError:
+            resp_json = {"raw_text": response.text}
 
-        return response.json()
+        # JSON log (to file) for response
+        self.logger.info(
+            "Received OpenAI API response",
+            extra={
+                "event": "openai_response",
+                "status_code": response.status_code,
+                "ok": response.ok,
+                "response_body": resp_json,
+            },
+        )
+
+        # If not ok, make it visible and raise a generic exception
+        if not response.ok:
+            self.logger.error(
+                "OpenAI API error",
+                extra={
+                    "event": "openai_error",
+                    "status_code": response.status_code,
+                    "response_body": resp_json,
+                },
+            )
+            raise Exception(
+                f"OpenAI API error {response.status_code}: {response.text}"
+            )
+
+        return resp_json

@@ -19,6 +19,7 @@ def build_agent_input(
     - static runtime info (profile_name, class_name)
     - per-run agent_input overrides from the profile/run
     - the target_file path if present
+    - the resolved provider (if available)
     """
     agent_input_obj: Dict[str, Any] = {
         "profile_name": profile_name,
@@ -30,6 +31,10 @@ def build_agent_input(
 
     if run_item.target_file:
         agent_input_obj["target_file"] = run_item.target_file
+
+    # Expose provider to the model (if configured)
+    if getattr(run_item, "provider", None):
+        agent_input_obj["provider"] = run_item.provider
 
     return agent_input_obj
 
@@ -64,7 +69,7 @@ def inject_placeholders(
     target_file: Optional[str],
     context_block: str,
 ) -> None:
-    """Replace placeholder tokens in the OpenAI payload messages.
+    """Replace placeholder tokens in the model payload messages.
 
     Mutates `run_params` in-place. It expects the payload to have a `messages`
     list compatible with the OpenAI Chat Completions API.
