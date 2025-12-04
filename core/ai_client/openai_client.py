@@ -2,6 +2,7 @@ import json
 from typing import Dict, Any, Optional
 
 import requests
+import os
 
 from core.logger import BasicLogger
 
@@ -37,8 +38,10 @@ class OpenAIClient:
         api_key: str = "",
     ):
         self.api_url = api_url
-        self.api_key = api_key
-        # JSON logs will go to logs/openai_client.jsonl if you configured BasicLogger that way
+
+        # NEW: automatically use environment variable if argument empty
+        self.api_key = api_key or os.getenv("OPENAI_API_KEY", "")
+
         self.logger = BasicLogger(
             self.__class__.__name__,
             log_file="openai_client.jsonl",
@@ -64,6 +67,16 @@ class OpenAIClient:
             )
 
         return sanitized
+    
+    
+    def call(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Backwards-compatible wrapper used by AppRunner._invoke_model.
+
+        Accepts a ready-to-send payload (matching OpenAI's chat.completions schema),
+        and returns the raw JSON response from the OpenAI API.
+        """
+        return self.send_request(payload)
 
     def send_request(
         self,

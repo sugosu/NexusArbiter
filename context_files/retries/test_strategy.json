@@ -1,0 +1,14 @@
+{
+  "blocks": [
+    {
+      "label": "block_for_codegen_1",
+      "attempts": [
+        {
+          "profile": "context_files/profiles/codegen_test_retry_pass1.json",
+          "provider": null,
+          "retry_context_files": null
+        }
+      ]
+    }
+  ]
+}

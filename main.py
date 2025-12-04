@@ -30,13 +30,9 @@ def main() -> None:
     config = RunConfig.from_file(args.config)
     runner = PipelineRunner(project_root=project_root, config=config)
 
-    result = runner.run()
+    # Run the pipeline; summary is logged inside PipelineRunner.run()
+    runner.run()
 
-    # Optional: exit code or final summary
-    print(
-        f"Pipeline finished: {result.succeeded}/{result.total_runs} succeeded, "
-        f"{result.failed} failed, pipeline_retried={result.pipeline_retried}"
-    )
 
 
 if __name__ == "__main__":

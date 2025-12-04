@@ -1,0 +1,86 @@
+{
+  "provider": "openai",
+
+  "retry_policy": {
+    "system": {
+      "max_attempts": 3,
+      "retry_on_status": [429, 500, 502, 503, 504],
+      "retry_on_network_errors": true,
+      "backoff_seconds": [2, 4, 8]
+    }
+  },
+
+  "runs": [
+    {
+      "name": "code_generation_1",
+      "profile_file": "context_files/profiles/code_generation_1.json",
+      "task_description": "Generate tetromino_block1.py for the first block.",
+      "context_file": [
+        "context_files/project_manifest_block1.json"
+      ],
+      "target_file": "app/tetris/tetromino_block1.py",
+
+      "strategy_file": "retries/codegen_strategies.json",
+      "strategy_block_index": 0,
+
+      "retry": 0,
+      "allowed_actions": [
+        "file_write",
+        "continue"
+      ]
+    },
+
+    {
+      "name": "validator_1",
+      "profile_file": "context_files/profiles/validator_1.json",
+      "task_description": "Validate tetromino_block1.py.",
+      "context_file": [
+        "app/tetris/tetromino_block1.py"
+      ],
+      "target_file": "",
+
+      "retry": 0,
+      "allowed_actions": [
+        "change_strategy",
+        "continue",
+        "break"
+      ]
+    },
+
+    {
+      "name": "code_generation_2",
+      "profile_file": "context_files/profiles/code_generation_2.json",
+      "task_description": "Generate tetromino_block2.py for the second block.",
+      "context_file": [
+        "context_files/project_manifest_block2.json"
+      ],
+      "target_file": "app/tetris/tetromino_block2.py",
+
+      "strategy_file": "retries/codegen_strategies.json",
+      "strategy_block_index": 1,
+
+      "retry": 0,
+      "allowed_actions": [
+        "file_write",
+        "continue"
+      ]
+    },
+
+    {
+      "name": "validator_2",
+      "profile_file": "context_files/profiles/validator_2.json",
+      "task_description": "Validate tetromino_block2.py.",
+      "context_file": [
+        "app/tetris/tetromino_block2.py"
+      ],
+      "target_file": "",
+
+      "retry": 0,
+      "allowed_actions": [
+        "change_strategy",
+        "continue",
+        "break"
+      ]
+    }
+  ]
+}

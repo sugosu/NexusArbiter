@@ -1,33 +1,28 @@
-# core/actions/continue_action.py
 from __future__ import annotations
 
-from .base_action import BaseAction, ActionContext
-from .registry import ActionRegistry
+from typing import Any, Dict
+
+from core.actions.base_action import BaseAction, ActionContext
 
 
 class ContinueAction(BaseAction):
     """
-    A no-op action indicating that the agent wants to keep iterating
-    without final side effects.
+    Action type: 'continue'
 
-    In the orchestration layer, a *single* 'continue' action is already
-    treated specially and short-circuits without executing any actions.
-    This class exists for completeness and future-proofing in case
-    'continue' ever appears in a mixed action list.
+    Signals that the pipeline should continue. The agent may optionally
+    set should_break = true, but in your validator profiles you’ll use
+    should_break = false.
     """
 
     action_type = "continue"
 
-    def validate(self) -> bool:
-        # We deliberately do NOT require any params. If the agent sends
-        # something, we just ignore it.
-        return True
+    def execute(self, ctx: ActionContext, params: Dict[str, Any]) -> None:
+        should_break = bool(params.get("should_break", False))
+        reason = params.get("reason")
 
-    def execute(self, ctx: ActionContext) -> None:
-        logger = getattr(ctx, "logger", None)
-        if logger is not None:
-            logger.info("[continue] No-op action executed; nothing to do.")
+        ctx.should_continue = True
+        ctx.should_break = should_break
 
-
-# Register
-ActionRegistry.register(ContinueAction)
+        ctx.logger.info(
+            f"[continue] should_break={should_break}, reason={reason!r}"
+        )
