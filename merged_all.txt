@@ -1,5 +1,33 @@
 
 ##########################################################################################
+# FILE: LICENSE
+##########################################################################################
+
+MIT License
+
+Copyright (c) 2025 Aydın Onat Gegeoğlu
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+
+
+##########################################################################################
 # FILE: main.py
 ##########################################################################################
 
@@ -35,13 +63,9 @@ def main() -> None:
     config = RunConfig.from_file(args.config)
     runner = PipelineRunner(project_root=project_root, config=config)
 
-    result = runner.run()
+    # Run the pipeline; summary is logged inside PipelineRunner.run()
+    runner.run()
 
-    # Optional: exit code or final summary
-    print(
-        f"Pipeline finished: {result.succeeded}/{result.total_runs} succeeded, "
-        f"{result.failed} failed, pipeline_retried={result.pipeline_retried}"
-    )
 
 
 if __name__ == "__main__":
@@ -57,15 +81,24 @@ import os
 import json
 
 OUTPUT_NAME = "merged_all.txt"
+LICENSE_NAME = "LICENSE"   # <--- added
 
 def collect_all_files(root_dir, output_name):
     files = []
     for dirpath, _, filenames in os.walk(root_dir):
         for fname in filenames:
-            # include .py and .json but skip output file
+
+            # Include LICENSE explicitly
+            if fname == LICENSE_NAME:
+                full_path = os.path.join(dirpath, fname)
+                files.append(full_path)
+                continue
+
+            # Include .py and .json but skip output file
             if fname.endswith((".py", ".json")) and fname != output_name:
                 full_path = os.path.join(dirpath, fname)
                 files.append(full_path)
+
     return files
 
 
@@ -98,24 +131,6 @@ if __name__ == "__main__":
     files = collect_all_files(root, OUTPUT_NAME)
     output_file = os.path.join(root, OUTPUT_NAME)
     merge_all(files, output_file)
-
-
-
-##########################################################################################
-# FILE: app\module_A.py
-##########################################################################################
-
-# === CONTEXT START ===
-# This module, referred to as Module A, is generated based on the task description.
-# It is intended to serve as a placeholder or starting point for further development.
-# === CONTEXT END ===
-
-class ModuleA:
-    def __init__(self):
-        pass
-
-    def example_method(self):
-        return "This is an example method in Module A."
 
 
 
@@ -272,6 +287,7 @@ class ModuleA:
 ##########################################################################################
 
 {
+  "provider": "openai",
   "name": "codegen_test_base",
   "model": "gpt-4o",
   "temperature": 0,
@@ -284,6 +300,47 @@ class ModuleA:
     {
       "role": "system",
       "content": "You are an AI code generation agent inside the aiAgency framework.\n\nGENERAL RULES:\n- You MUST respond with a single JSON object with an 'agent' key and NOTHING else.\n- The JSON must have the structure:\n  {\n    \"agent\": {\n      \"name\": string,\n      \"version\": string,\n      \"actions\": [ action, ... ]\n    }\n  }\n\nACTION FORMAT:\n- You MUST emit exactly ONE action.\n- The action MUST be of type \"file_write\".\n- The action must have params:\n  {\n    \"target_path\": string,       // placeholder, will be ignored by engine\n    \"code\": string,              // full Python file content\n    \"context\": string | null     // optional notes\n  }\n\nCODE REQUIREMENTS (BASE PROFILE):\n- Generate a valid Python module defining a class 'ModuleA' with at least one method.\n- DO NOT include the marker '# VALID_VERSION' anywhere in the file.\n- The file should be syntactically correct.\n\nRUNTIME INPUT:\n- You will receive a JSON object called 'agent_input'.\n- You will receive a context block with any additional files.\n\nYou MUST NOT output markdown or prose outside the JSON object."
+    },
+    {
+      "role": "user",
+      "content": "Runtime agent input:\n${agent_input}"
+    },
+    {
+      "role": "user",
+      "content": "TASK DESCRIPTION:\n${task_description}"
+    },
+    {
+      "role": "user",
+      "content": "Context files content:\n${context_block}"
+    }
+  ],
+
+  "response_format": {
+    "type": "json_object"
+  },
+
+  "user": "${default_user}"
+}
+
+
+
+##########################################################################################
+# FILE: context_files\profiles\codegen_test_retry_pass1.json
+##########################################################################################
+
+{
+  "name": "codegen_test_retry_pass1",
+  "model": "gpt-4o",
+  "temperature": 0,
+  "top_p": 1,
+  "max_tokens": 2000,
+
+  "task_description": "Retry codegen profile that MUST include the '# VALID_VERSION' marker.",
+
+  "messages": [
+    {
+      "role": "system",
+      "content": "You are an AI code generation agent inside the aiAgency framework.\n\nGENERAL RULES:\n- You MUST respond with a single JSON object with an 'agent' key and NOTHING else.\n- The JSON must have the structure:\n  {\n    \"agent\": {\n      \"name\": string,\n      \"version\": string,\n      \"actions\": [ action, ... ]\n    }\n  }\n\nACTION FORMAT:\n- You MUST emit exactly ONE action.\n- The action MUST be of type \"file_write\".\n- The action must have params:\n  {\n    \"target_path\": string,       // placeholder, will be ignored by engine\n    \"code\": string,              // full Python file content\n    \"context\": string | null     // optional notes\n  }\n\nCODE REQUIREMENTS (RETRY PROFILE):\n- Generate a valid Python module defining a class 'ModuleA' with at least one method.\n- You MUST include a comment line '# VALID_VERSION' near the top of the file.\n- The file should be syntactically correct.\n\nRUNTIME INPUT:\n- You will receive a JSON object called 'agent_input'.\n- You will receive a context block with any additional files.\n\nYou MUST NOT output markdown or prose outside the JSON object."
     },
     {
       "role": "user",
@@ -435,6 +492,33 @@ class ModuleA:
   "user": "${default_user}"
 }
 
+
+
+##########################################################################################
+# FILE: context_files\profiles\gemini_codegen.json
+##########################################################################################
+
+{
+  "name": "gemini_codegen",
+  "model": "gemini-2.0-flash",
+  "provider": "gemini",
+  "temperature": 0.1,
+  "top_p": 0.95,
+  "max_tokens": 2000,
+  "messages": [
+    {
+      "role": "system",
+      "content": "You are an AI code generation agent.\n\nRULES:\n1. You must output ONLY a valid JSON object.\n2. The JSON must follow this structure:\n{\n  \"agent\": {\n    \"actions\": [\n      {\n        \"type\": \"file_write\",\n        \"params\": {\n          \"target_path\": \"IGNORED\",\n          \"code\": \"<FULL_PYTHON_CODE>\"\n        }\n      }\n    ]\n  }\n}\n3. Do not include markdown formatting (like ```json ... ```) outside the JSON structure."
+    },
+    {
+      "role": "user",
+      "content": "TASK: ${task_description}\n\nCONTEXT:\n${context_block}"
+    }
+  ],
+  "response_format": {
+    "type": "json_object"
+  }
+}
 
 
 ##########################################################################################
@@ -749,6 +833,27 @@ class ModuleA:
 
 
 ##########################################################################################
+# FILE: context_files\runs\gemini_test.json
+##########################################################################################
+
+{
+  "provider": "gemini",
+  "runs": [
+    {
+      "name": "gemini_hello_world",
+      "profile_file": "context_files/profiles/gemini_codegen.json",
+      "task_description": "Write a Python script that prints 'Hello from Gemini 2.0!' and calculates the 10th Fibonacci number.",
+      "context_file": [],
+      "target_file": "app/gemini_hello.py",
+      "allowed_actions": [
+        "file_write"
+      ]
+    }
+  ]
+}
+
+
+##########################################################################################
 # FILE: context_files\runs\profile_file_test.json
 ##########################################################################################
 
@@ -788,7 +893,6 @@ class ModuleA:
 ##########################################################################################
 
 {
-  "provider": "openai",
 
   "runs": [
     {
@@ -814,7 +918,7 @@ class ModuleA:
 
       "strategy_index": 0,
       "target_run": "codegen_1",
-      "strategy_file": "retries/test_strategy.json",
+      "strategy_file": "context_files/retries/test_strategy.json",
 
       "allowed_actions": [
         "change_strategy",
@@ -1815,6 +1919,7 @@ import json
 from typing import Dict, Any, Optional
 
 import requests
+import os
 
 from core.logger import BasicLogger
 
@@ -1850,8 +1955,10 @@ class OpenAIClient:
         api_key: str = "",
     ):
         self.api_url = api_url
-        self.api_key = api_key
-        # JSON logs will go to logs/openai_client.jsonl if you configured BasicLogger that way
+
+        # NEW: automatically use environment variable if argument empty
+        self.api_key = api_key or os.getenv("OPENAI_API_KEY", "")
+
         self.logger = BasicLogger(
             self.__class__.__name__,
             log_file="openai_client.jsonl",
@@ -1877,6 +1984,16 @@ class OpenAIClient:
             )
 
         return sanitized
+    
+    
+    def call(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Backwards-compatible wrapper used by AppRunner._invoke_model.
+
+        Accepts a ready-to-send payload (matching OpenAI's chat.completions schema),
+        and returns the raw JSON response from the OpenAI API.
+        """
+        return self.send_request(payload)
 
     def send_request(
         self,
@@ -1963,9 +2080,10 @@ class OpenAIClient:
 # FILE: core\config\run_config.py
 ##########################################################################################
 
+# core/config/run_config.py
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Optional, Dict, Any
 import json
@@ -1988,9 +2106,6 @@ class RunItem:
     target_file: Optional[str]
     allowed_actions: List[str]
 
-    # Optional provider override (string: "openai", "gemini", ...)
-    provider: Optional[str] = None
-
     # These fields apply ONLY to validator runs.
     # Code-generation runs must leave them as None.
     strategy_index: Optional[int] = None        # which strategy block to use
@@ -2001,11 +2116,12 @@ class RunItem:
     retry: Optional[int] = None
     profile_name: Optional[str] = None
 
-
     def is_validator(self) -> bool:
-        return (self.strategy_index is not None) and \
-               (self.target_run is not None) and \
-               (self.strategy_file is not None)
+        return (
+            self.strategy_index is not None
+            and self.target_run is not None
+            and self.strategy_file is not None
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -2016,16 +2132,18 @@ class RunItem:
 class RunConfig:
     """
     Represents the parsed content of the run configuration JSON.
+
+    NOTE: Provider is intentionally NOT stored here anymore.
+          Provider is now taken from profile files only (or strategy overrides).
     """
 
-    provider: Optional[str]
     runs: List[RunItem]
     retry_policy: Optional[Dict[str, Any]] = None
 
     @staticmethod
     def from_file(path: Path | str) -> "RunConfig":
         """
-        Load and parse runs.json
+        Load and parse runs.json.
         """
         if isinstance(path, str):
             path = Path(path)
@@ -2033,11 +2151,11 @@ class RunConfig:
         with path.open("r", encoding="utf-8") as f:
             raw = json.load(f)
 
-        provider = raw.get("provider")
+        # Top-level `provider` is ignored now (backwards-compatible).
         retry_policy = raw.get("retry_policy")
 
         runs_section = raw.get("runs", [])
-        runs = []
+        runs: List[RunItem] = []
 
         for r in runs_section:
             run_item = RunItem(
@@ -2048,22 +2166,22 @@ class RunConfig:
                 target_file=r.get("target_file"),
                 allowed_actions=r.get("allowed_actions", []),
 
-                provider=r.get("provider"),
+                # Validator-only fields:
                 strategy_index=r.get("strategy_index"),
                 target_run=r.get("target_run"),
                 strategy_file=r.get("strategy_file"),
 
+                # Misc metadata:
                 retry=r.get("retry"),
                 profile_name=r.get("profile_name"),
             )
             runs.append(run_item)
 
         return RunConfig(
-            provider=provider,
             runs=runs,
-            retry_policy=retry_policy
+            retry_policy=retry_policy,
         )
-
+    
 
 
 ##########################################################################################
@@ -2598,6 +2716,7 @@ def inject_placeholders(
 # FILE: core\runtime\app_runner.py
 ##########################################################################################
 
+# core/runtime/app_runner.py
 from __future__ import annotations
 
 import json
@@ -2607,8 +2726,9 @@ from typing import Any, Dict, List, Optional
 from core.logger import BasicLogger
 from core.actions.registry import ActionRegistry
 from core.actions.base_action import ActionContext, BaseAction
-from core.ai_client.ai_client import OpenAIClient
+from core.ai_client.openai_client import OpenAIClient
 from core.ai_client.ai_response_parser import AIResponseParser
+from core.ai_client.gemini_client import GeminiClient
 
 
 class AppRunner:
@@ -2616,7 +2736,7 @@ class AppRunner:
     Responsible for:
         - loading the profile JSON
         - assembling model input payload
-        - calling the correct provider (currently OpenAI)
+        - calling the correct provider (OpenAI, Gemini, ...)
         - parsing model output into actions
         - filtering allowed actions
         - executing actions in order
@@ -2627,7 +2747,7 @@ class AppRunner:
 
     def __init__(self, project_root: Path | str):
         self.project_root = Path(project_root).resolve()
-        self.logger = BasicLogger("AppRunner")
+        self.logger = BasicLogger("AppRunner").get_logger()
 
         # Action registry must be available
         ActionRegistry.register_defaults()
@@ -2645,13 +2765,21 @@ class AppRunner:
     ) -> ActionContext:
         """
         Execute a single run step. This is called by RunExecutor.
+
+        Provider resolution order:
+            1) provider_override   (strategy attempt)
+            2) profile["provider"] (profile JSON)
+            3) "openai" (default)
         """
 
         resolved_profile = self._load_profile(profile_file)
-        provider_name = provider_override or run_item.provider
+
+        provider_name: Optional[str] = provider_override
+        if not provider_name:
+            provider_name = resolved_profile.get("provider")
 
         if not provider_name:
-            provider_name = "openai"  # default
+            provider_name = "openai"
 
         self.logger.info(
             f"Selected provider '{provider_name}' for profile '{profile_file}' "
@@ -2663,7 +2791,7 @@ class AppRunner:
             resolved_profile,
             run_item,
             provider_name,
-            context_files
+            context_files,
         )
 
         # Call provider
@@ -2690,16 +2818,24 @@ class AppRunner:
     # ----------------------------------------------------------------------
 
     def _load_profile(self, profile_file: str) -> Dict[str, Any]:
-        path = self.project_root / profile_file
-        with path.open("r", encoding="utf-8") as f:
-            return json.load(f)
+        """
+        Load the profile JSON from disk.
+        """
+        profile_path = (self.project_root / profile_file).resolve()
+        with profile_path.open("r", encoding="utf-8") as f:
+            data = json.load(f)
+
+        if not isinstance(data, dict):
+            raise ValueError(f"Profile '{profile_file}' must contain a JSON object.")
+
+        return data
 
     def _build_model_payload(
         self,
         profile_dict: Dict[str, Any],
         run_item: Any,
         provider_name: str,
-        context_files: List[str]
+        context_files: List[str],
     ) -> Dict[str, Any]:
         """
         Merge:
@@ -2709,7 +2845,6 @@ class AppRunner:
         """
 
         # Inject runtime metadata into the profile
-        # (This mirrors your existing aiAgency logic.)
         profile_dict = dict(profile_dict)  # shallow copy
 
         # Build agent_input
@@ -2721,7 +2856,7 @@ class AppRunner:
         }
 
         # Construct context block
-        context_blocks = []
+        context_blocks: List[str] = []
         for cf in context_files:
             path = self.project_root / cf
             try:
@@ -2736,7 +2871,7 @@ class AppRunner:
                 )
 
         # agent_input is placed inside the request
-        payload = {
+        payload: Dict[str, Any] = {
             "model": profile_dict.get("model"),
             "temperature": profile_dict.get("temperature", 0),
             "top_p": profile_dict.get("top_p", 1),
@@ -2745,9 +2880,11 @@ class AppRunner:
                 profile_dict.get("messages", []),
                 agent_input,
                 context_blocks,
-                run_item.task_description,
+                getattr(run_item, "task_description", None),
             ),
-            "response_format": profile_dict.get("response_format", {"type": "json_object"}),
+            "response_format": profile_dict.get(
+                "response_format", {"type": "json_object"}
+            ),
             "user": profile_dict.get("user", "${default_user}"),
         }
 
@@ -2759,18 +2896,20 @@ class AppRunner:
         messages: List[Dict[str, Any]],
         agent_input: Dict[str, Any],
         context_blocks: List[str],
-        task_description: Optional[str]
+        task_description: Optional[str],
     ) -> List[Dict[str, Any]]:
         """
         Replace ${agent_input}, ${context_block} placeholders inside the profile messages.
         """
         ctx_combined = "\n\n".join(context_blocks)
 
-        result = []
+        result: List[Dict[str, Any]] = []
         for msg in messages:
             content = msg.get("content", "")
 
-            content = content.replace("${agent_input}", json.dumps(agent_input, indent=2))
+            content = content.replace(
+                "${agent_input}", json.dumps(agent_input, indent=2)
+            )
             content = content.replace("${context_block}", ctx_combined)
 
             if task_description:
@@ -2778,30 +2917,69 @@ class AppRunner:
 
             result.append({
                 "role": msg["role"],
-                "content": content
+                "content": content,
             })
         return result
 
     def _invoke_model(self, provider_name: str, payload: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Only OpenAI provider is implemented today.
-        """
-        if provider_name != "openai":
-            raise NotImplementedError(f"Provider '{provider_name}' not implemented.")
 
-        client = OpenAIClient()
-        response = client.call(payload)
-        return AIResponseParser.extract_agent_object(response)
+        # Extract parameters defined in your JSON profile
+        temperature = payload.get("temperature", 0.0)
+        model_name = payload.get("model")
+
+        if provider_name == "openai":
+            client = OpenAIClient()
+            return AIResponseParser.extract_agent(client.call(payload))
+
+        elif provider_name == "gemini":
+            # HANDLE MODEL NAME MISMATCH:
+            # If the JSON still says "gpt-4o", we default to a gemini model
+            # so the API call doesn't fail.
+            if not model_name or "gpt" in model_name:
+                model_name = "gemini-2.0-flash"
+
+            # Pass the model name from JSON (or the override) into the client
+            client = GeminiClient(model=model_name)
+
+            # Extract messages to format prompt
+            messages = payload.get("messages", [])
+            system_instruction = None
+            user_parts: List[str] = []
+
+            for msg in messages:
+                role = msg.get("role")
+                content = msg.get("content", "")
+                if role == "system" and not system_instruction:
+                    system_instruction = content
+                else:
+                    user_parts.append(f"{role.upper()}: {content}")
+
+            final_prompt = "\n\n".join(user_parts)
+
+            # Pass the TEMPERATURE from JSON into the Gemini client
+            response_dict = client.generate_content(
+                prompt=final_prompt,
+                system_instruction=system_instruction,
+                temperature=temperature,
+            )
+
+            # Wrap result to look like an 'agent' object
+            return AIResponseParser.extract_agent(
+                {"choices": [{"message": {"content": response_dict}}]}
+            )
+
+        else:
+            raise NotImplementedError(f"Provider '{provider_name}' not implemented.")
 
     def _filter_actions(
         self,
         actions: List[Dict[str, Any]],
-        allowed: List[str]
+        allowed: List[str],
     ) -> List[Dict[str, Any]]:
         """
         Keep only actions whose type is allowed by run_item.
         """
-        kept = []
+        kept: List[Dict[str, Any]] = []
         for a in actions:
             if a.get("type") in allowed:
                 kept.append(a)
@@ -2811,7 +2989,8 @@ class AppRunner:
                 )
         if not kept:
             self.logger.warning(
-                f"No actions left after allowed_actions filter. Original actions: {actions}"
+                f"No actions left after allowed_actions filter. "
+                f"Original actions: {actions}"
             )
         return kept
 
@@ -2832,7 +3011,7 @@ class AppRunner:
             except Exception as e:
                 ctx.logger.error(
                     f"Exception during action '{action_type}': {e}",
-                    exc_info=True
+                    exc_info=True,
                 )
                 # leave ctx flags as-is; executor will stop run.
                 break
@@ -2843,9 +3022,9 @@ class AppRunner:
 # FILE: core\runtime\pipeline_runner.py
 ##########################################################################################
 
+# core/runtime/pipeline_runner.py
 from __future__ import annotations
 
-import json
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
@@ -2871,7 +3050,7 @@ class PipelineRunner:
     def __init__(self, project_root: str, config: RunConfig):
         self.project_root = Path(project_root)
         self.config = config
-        self.logger = BasicLogger("PipelineRunner")
+        self.logger = BasicLogger("PipelineRunner").get_logger()
 
         self.executor = RunExecutor(project_root=str(self.project_root))
 
@@ -2894,11 +3073,15 @@ class PipelineRunner:
             result = self._execute_run_item(run_item)
 
             if result.should_break:
-                self.logger.info(f"[RUN] '{run_item.name}' requested break. Pipeline stopping.")
+                self.logger.info(
+                    f"[RUN] '{run_item.name}' requested break. Pipeline stopping."
+                )
                 break
 
             if not result.success:
-                self.logger.error(f"[RUN] '{run_item.name}' failed. Pipeline stopping.")
+                self.logger.error(
+                    f"[RUN] '{run_item.name}' failed. Pipeline stopping."
+                )
                 break
 
             succeeded += 1
@@ -2929,7 +3112,10 @@ class PipelineRunner:
         profile_file = run_item.profile_file
         context_files = run_item.context_file
         target_file = run_item.target_file
-        provider_override = run_item.provider or self.config.provider
+
+        # Provider now comes from profile (or strategy overrides),
+        # so for a normal run we pass no override.
+        provider_override: Optional[str] = None
 
         return self.executor.execute_once(
             run_item=run_item,
@@ -2942,7 +3128,11 @@ class PipelineRunner:
     # ------------------------------------------------------------------
     # Handle change_strategy from validator
     # ------------------------------------------------------------------
-    def _handle_change_strategy(self, validator_run: RunItem, validator_result: RunResult) -> RunResult:
+    def _handle_change_strategy(
+        self,
+        validator_run: RunItem,
+        validator_result: RunResult,
+    ) -> RunResult:
 
         if not validator_run.is_validator():
             self.logger.error(
@@ -2959,14 +3149,17 @@ class PipelineRunner:
         try:
             strategy = StrategyFile.from_file(self.project_root / strategy_file_path)
         except Exception as e:
-            self.logger.error(f"Error loading strategy file '{strategy_file_path}': {e}")
+            self.logger.error(
+                f"Error loading strategy file '{strategy_file_path}': {e}"
+            )
             return RunResult(success=False)
 
         # Find target run item (codegen)
         target_run = self._find_run_item(target_run_name)
         if target_run is None:
             self.logger.error(
-                f"Validator '{validator_run.name}' refers to unknown target_run '{target_run_name}'."
+                f"Validator '{validator_run.name}' refers to unknown target_run "
+                f"'{target_run_name}'."
             )
             return RunResult(success=False)
 
@@ -2979,45 +3172,58 @@ class PipelineRunner:
 
         if attempt is None:
             self.logger.info(
-                f"Strategy exhausted for target_run='{target_run_name}', block={block_index}. "
-                f"No more attempts available."
+                f"Strategy exhausted for target_run='{target_run_name}', "
+                f"block={block_index}. No more attempts available."
             )
             return RunResult(success=False)
 
         # Apply overrides
         overridden_profile = attempt.profile or target_run.profile_file
-        overridden_provider = attempt.provider or target_run.provider or self.config.provider
+        # Provider override now ONLY from strategy attempt;
+        # if None, provider will be taken from the profile.
+        overridden_provider = attempt.provider
         overridden_context = attempt.retry_context_files or target_run.context_file
 
         self.logger.info(
             f"[change_strategy] Applying strategy attempt #{attempt_number} for "
             f"run '{target_run_name}' (block={block_index}). "
-            f"Overrides: profile='{overridden_profile}', provider='{overridden_provider}', "
-            f"context={overridden_context}"
+            f"Profile='{overridden_profile}', provider_override='{overridden_provider}', "
+            f"context_files={overridden_context}"
         )
 
-        # Execute target run with overrides
+        # Build a synthetic RunItem for the overridden execution,
+        # reusing the original run's metadata where appropriate.
+        overridden_run = RunItem(
+            name=target_run.name,
+            profile_file=overridden_profile,
+            task_description=target_run.task_description,
+            context_file=overridden_context,
+            target_file=target_run.target_file,
+            allowed_actions=target_run.allowed_actions,
+            # validator-only metadata are not needed for the codegen rerun
+            strategy_index=None,
+            target_run=None,
+            strategy_file=None,
+            retry=target_run.retry,
+            profile_name=target_run.profile_name,
+        )
+
+        # Execute the codegen rerun with strategy overrides
         rerun_result = self.executor.execute_once(
-            run_item=target_run,
+            run_item=overridden_run,
             context_files=overridden_context,
             profile_file=overridden_profile,
             target_file=target_run.target_file,
             provider_override=overridden_provider,
         )
 
-        # If rerun requests break, stop immediately
-        if rerun_result.should_break:
-            self.logger.info(
-                f"[change_strategy] Target run '{target_run_name}' requested break during strategy attempt."
-            )
-            return rerun_result
-
         # Decide next action
         if rerun_result.change_strategy_requested:
             # Validator re-executed itself and again requested another strategy change:
             # We MUST increment attempt counter and process again.
             self.logger.info(
-                f"[change_strategy] Strategy attempt #{attempt_number} resulted in another change_strategy request."
+                f"[change_strategy] Strategy attempt #{attempt_number} resulted in "
+                f"another change_strategy request."
             )
             self.strategy_attempt_counters[key] = attempt_number + 1
             return self._handle_change_strategy(validator_run, rerun_result)
@@ -3025,20 +3231,24 @@ class PipelineRunner:
         if not rerun_result.success:
             # Failed without triggering another change_strategy
             self.logger.error(
-                f"[change_strategy] Strategy attempt #{attempt_number} failed without further instructions."
+                f"[change_strategy] Strategy attempt #{attempt_number} failed without "
+                f"further instructions."
             )
             self.strategy_attempt_counters[key] = attempt_number + 1
             return rerun_result
 
         # Successful rerun → return success back to validator
         self.logger.info(
-            f"[change_strategy] Strategy attempt #{attempt_number} succeeded for '{target_run_name}'."
+            f"[change_strategy] Strategy attempt #{attempt_number} succeeded for "
+            f"'{target_run_name}'."
         )
         self.strategy_attempt_counters[key] = attempt_number + 1
 
-        # FIX: After successful codegen rerun, rerun validator itself again.
-        # Validator must validate the new output before pipeline continues.
-        self.logger.info(f"[change_strategy] Re-running validator '{validator_run.name}' after successful codegen fix.")
+        # After successful codegen rerun, re-run validator itself again.
+        self.logger.info(
+            f"[change_strategy] Re-running validator '{validator_run.name}' after "
+            f"successful codegen fix."
+        )
         return self._execute_once(validator_run)
 
     # ------------------------------------------------------------------
@@ -3133,255 +3343,5 @@ class RunExecutor:
 # FILE: core\runtime\__init__.py
 ##########################################################################################
 
-
-
-
-##########################################################################################
-# FILE: test\tetris_manifest.json
-##########################################################################################
-
-{"project_name": "TetrisGame", "language": "python", "version": "1.0.0", "structure": [{"module_name": "config", "file_path": "tetris/config.py", "description": "Handles game configuration settings.", "imports": [{"source": "json", "names": [], "type": "standard"}], "global_constants": [{"name": "SCREEN_WIDTH", "type": "int", "value": "800"}, {"name": "SCREEN_HEIGHT", "type": "int", "value": "600"}]}, {"module_name": "tetromino", "file_path": "tetris/tetromino.py", "description": "Defines tetromino shapes and rotations.", "imports": [{"source": "typing", "names": ["List"], "type": "standard"}], "classes": [{"class_name": "Tetromino", "inherits_from": [], "docstring": "Represents a tetromino piece.", "attributes": [{"name": "shape", "type": "List[List[int]]", "access": "public", "description": "Matrix representing the shape of the tetromino."}], "methods": [{"name": "rotate", "access": "public", "args": [], "return_type": "None", "description": "Rotates the tetromino shape."}]}]}, {"module_name": "board", "file_path": "tetris/board.py", "description": "Manages the game board state.", "imports": [{"source": "typing", "names": ["List"], "type": "standard"}], "classes": [{"class_name": "Board", "inherits_from": [], "docstring": "Represents the game board.", "attributes": [{"name": "grid", "type": "List[List[int]]", "access": "private", "description": "2D grid representing the board state."}], "methods": [{"name": "clear_lines", "access": "public", "args": [], "return_type": "int", "description": "Clears completed lines and returns the number of lines cleared."}]}]}, {"module_name": "game_engine", "file_path": "tetris/game_engine.py", "description": "Main game loop and logic.", "imports": [{"source": "tetris.board", "names": ["Board"], "type": "local"}, {"source": "tetris.tetromino", "names": ["Tetromino"], "type": "local"}], "classes": [{"class_name": "GameEngine", "inherits_from": [], "docstring": "Controls the game flow.", "attributes": [{"name": "board", "type": "Board", "access": "private", "description": "The game board instance."}], "methods": [{"name": "run", "access": "public", "args": [], "return_type": "None", "description": "Runs the main game loop."}]}]}, {"module_name": "input_handler", "file_path": "tetris/input_handler.py", "description": "Handles user input.", "imports": [{"source": "pygame", "names": [], "type": "third_party"}], "classes": [{"class_name": "InputHandler", "inherits_from": [], "docstring": "Processes user input.", "methods": [{"name": "process_input", "access": "public", "args": [], "return_type": "None", "description": "Processes input events."}]}]}, {"module_name": "renderer", "file_path": "tetris/renderer.py", "description": "Renders the game state.", "imports": [{"source": "pygame", "names": [], "type": "third_party"}], "classes": [{"class_name": "Renderer", "inherits_from": [], "docstring": "Renders the game board and pieces.", "methods": [{"name": "render", "access": "public", "args": [], "return_type": "None", "description": "Renders the current game state to the screen."}]}]}, {"module_name": "test_game", "file_path": "tetris/test/test_game.py", "description": "Tests for core game mechanics.", "imports": [{"source": "unittest", "names": [], "type": "standard"}, {"source": "tetris.board", "names": ["Board"], "type": "local"}], "classes": [{"class_name": "TestGameMechanics", "inherits_from": ["unittest.TestCase"], "docstring": "Tests for game mechanics like line clearing.", "methods": [{"name": "test_line_clearing", "access": "public", "args": [], "return_type": "None", "description": "Tests if lines are cleared correctly."}]}]}]}
-
-
-##########################################################################################
-# FILE: test\core\git\git_client.py
-##########################################################################################
-
-# === CONTEXT START ===
-# This module defines the GitClient class, which provides methods to interact
-# with a Git repository. It includes functionalities to initialize a repository,
-# add files, commit changes, push to a remote, pull from a remote, checkout
-# branches, and get the current branch status. The refactoring removes the
-# hardcoded 'master' branch default, allowing for a more flexible branch
-# handling by defaulting to 'main' if no branch is specified.
-# === CONTEXT END ===
-
-import subprocess
-from typing import Union
-from core.logger import BasicLogger
-
-class GitClient:
-    def __init__(self, repo_path: str):
-        """Initialize the GitClient with the path to the repository."""
-        self.repo_path = repo_path
-        self.logger = BasicLogger(self.__class__.__name__).get_logger()
-
-    def _run_git_command(self, *args: str) -> str:
-        self.logger.info(f'Running git command: {args}')
-        try:
-            result = subprocess.run(
-                ['git'] + list(args),
-                cwd=self.repo_path,
-                text=True,
-                capture_output=True,
-                check=True
-            )
-            return result.stdout.strip()
-        except subprocess.CalledProcessError as exc:
-            stdout_msg = (exc.stdout or "").strip()
-            stderr_msg = (exc.stderr or "").strip()
-
-            if stdout_msg:
-                self.logger.error(f"Git stdout (cmd: {args}): {stdout_msg}")
-            if stderr_msg:
-                self.logger.error(f"Git stderr (cmd: {args}): {stderr_msg}")
-
-            # Re-raise so the caller still gets the failure
-            raise
-
-    def init_repo(self) -> None:
-        """Initialize a new git repository."""
-        self.logger.info('Initializing repository')
-        self._run_git_command('init')
-
-    def add(self, paths: Union[list[str], str]) -> str:
-        """Add file contents to the index."""
-        self.logger.info(f'Adding paths: {paths}')
-        if isinstance(paths, str):
-            paths = [paths]
-        return self._run_git_command('add', *paths)
-
-    def commit(self, message: str) -> str:
-        """Record changes to the repository with a commit message."""
-        self.logger.info(f'Committing with message: {message}')
-        return self._run_git_command('commit', '-m', message)
-
-    def push(self, remote: str = "origin", branch: str = None) -> str:
-        """Update remote refs along with associated objects."""
-        branch = branch or 'main'
-        self.logger.info(f'Pushing to {remote}/{branch}')
-        return self._run_git_command('push', remote, branch)
-
-    def pull(self, remote: str = "origin", branch: str = None) -> str:
-        """Fetch from and integrate with another repository or a local branch."""
-        branch = branch or 'main'
-        self.logger.info(f'Pulling from {remote}/{branch}')
-        return self._run_git_command('pull', remote, branch)
-
-    def checkout(self, branch: str, create_if_missing: bool = False) -> str:
-        """Switch branches or restore working tree files."""
-        self.logger.info(f'Checking out branch: {branch}, create if missing: {create_if_missing}')
-        if create_if_missing:
-            return self._run_git_command('checkout', '-b', branch)
-        return self._run_git_command('checkout', branch)
-
-    def status(self) -> str:
-        """Show the working tree status."""
-        self.logger.info('Getting status')
-        return self._run_git_command('status')
-
-    def get_current_branch(self) -> str:
-        """Get the name of the current branch."""
-        self.logger.info('Getting current branch')
-        return self._run_git_command('rev-parse', '--abbrev-ref', 'HEAD')
-
-
-
-##########################################################################################
-# FILE: test\manifests\tetris_project_manifest.json
-##########################################################################################
-
-{"project_name": "TetrisGame", "language": "python", "version": "1.0.0", "structure": [{"module_name": "game_engine", "file_path": "tetris/game_engine.py", "description": "Core game logic for Tetris, including piece movement and collision detection.", "imports": [{"source": "random", "names": [], "type": "standard"}, {"source": "pygame", "names": ["Surface"], "type": "third_party"}], "global_constants": [{"name": "BOARD_WIDTH", "type": "int", "value": "10"}, {"name": "BOARD_HEIGHT", "type": "int", "value": "20"}], "classes": [{"class_name": "Tetris", "inherits_from": [], "decorators": [], "docstring": "Main class for Tetris game logic.", "attributes": [{"name": "board", "type": "List[List[int]]", "access": "private", "description": "2D list representing the game board."}, {"name": "score", "type": "int", "access": "public", "default_value": "0", "description": "Current score of the game."}], "methods": [{"name": "__init__", "access": "public", "args": [], "return_type": "None", "description": "Initializes the game board and score."}, {"name": "move_piece", "access": "public", "args": [{"name": "direction", "type": "str"}], "return_type": "bool", "description": "Moves the current piece left, right, or down.", "raises": ["ValueError"]}, {"name": "rotate_piece", "access": "public", "args": [], "return_type": "None", "description": "Rotates the current piece if possible."}, {"name": "check_collision", "access": "private", "args": [], "return_type": "bool", "description": "Checks for collisions with the board or other pieces."}]}]}]}
-
-
-##########################################################################################
-# FILE: test\runs\tetris_project_run.json
-##########################################################################################
-
-{"runs": [{"profile_name": "code_generation", "class_name": "tetris/game_engine.py", "context_file": [], "target_file": "tetris/game_engine.py", "task_description": "Implement the game_engine module in tetris/game_engine.py. This includes core game logic for Tetris, such as piece movement and collision detection. Key class: Tetris.", "agent_input": {"module_name": "game_engine", "file_path": "tetris/game_engine.py", "manifest_language": "python", "goal": "Core game logic for Tetris, including piece movement and collision detection."}, "retry": 2, "retry_context_files": [], "allowed_actions": ["file_write"]}]}
-
-
-##########################################################################################
-# FILE: test\tetris\board.py
-##########################################################################################
-
-# === CONTEXT START ===
-# This module manages the game board state for a Tetris game.
-# It includes the GameBoard class with a grid field and a method to clear completed lines.
-# === CONTEXT END ===
-
-class GameBoard:
-    def __init__(self, width, height):
-        """
-        Initialize the game board with the given width and height.
-        The grid is represented as a list of lists, where each inner list is a row.
-        """
-        self.width = width
-        self.height = height
-        self.grid = [[0] * width for _ in range(height)]
-
-    def clear_lines(self):
-        """
-        Clears completed lines from the board.
-        A completed line is one where all cells are non-zero.
-        """
-        new_grid = [row for row in self.grid if any(cell == 0 for cell in row)]
-        lines_cleared = self.height - len(new_grid)
-        # Add empty lines at the top for each cleared line
-        for _ in range(lines_cleared):
-            new_grid.insert(0, [0] * self.width)
-        self.grid = new_grid
-
-    def __str__(self):
-        """
-        Returns a string representation of the board for debugging purposes.
-        """
-        return '\n'.join(''.join(str(cell) for cell in row) for row in self.grid)
-
-
-
-##########################################################################################
-# FILE: test\tetris\config.py
-##########################################################################################
-
-# === CONTEXT START ===
-# This module handles game configuration settings for a Tetris game.
-# It includes the GameConfig class with fields for board_width, board_height, and tick_rate.
-# The module provides a method to load these settings from a file.
-# === CONTEXT END ===
-
-import json
-
-class GameConfig:
-    def __init__(self, board_width=10, board_height=20, tick_rate=1.0):
-        self.board_width = board_width
-        self.board_height = board_height
-        self.tick_rate = tick_rate
-
-    @classmethod
-    def load_from_file(cls, file_path):
-        """
-        Load game configuration from a JSON file.
-
-        :param file_path: Path to the configuration file.
-        :return: An instance of GameConfig with settings loaded from the file.
-        """
-        with open(file_path, 'r') as file:
-            config_data = json.load(file)
-            return cls(
-                board_width=config_data.get('board_width', 10),
-                board_height=config_data.get('board_height', 20),
-                tick_rate=config_data.get('tick_rate', 1.0)
-            )
-
-
-
-##########################################################################################
-# FILE: test\tetris\input.py
-##########################################################################################
-
-# === CONTEXT START ===
-# This module handles user input for a game, specifically implementing
-# the InputHandler class with a method to process user input for game control.
-# === CONTEXT END ===
-
-class InputHandler:
-    def get_input(self):
-        """
-        Process user input for game control.
-
-        This method should capture and interpret user input, such as keyboard
-        events, to control the game. The specific implementation will depend
-        on the input method and game requirements.
-        """
-        # Placeholder for input processing logic
-        # Example: return 'left', 'right', 'rotate', 'drop', etc.
-        pass
-
-
-
-##########################################################################################
-# FILE: test\tetris\tetromino.py
-##########################################################################################
-
-# === CONTEXT START ===
-# This module represents Tetris pieces and their behaviors.
-# It includes the Tetromino class with fields for shape and position.
-# The module also implements a rotate method to rotate the tetromino shape.
-# === CONTEXT END ===
-
-class Tetromino:
-    def __init__(self, shape, position=(0, 0)):
-        """
-        Initialize a Tetromino with a given shape and position.
-
-        :param shape: A list of lists representing the tetromino shape.
-        :param position: A tuple (x, y) representing the tetromino's position on the board.
-        """
-        self.shape = shape
-        self.position = position
-
-    def rotate(self):
-        """
-        Rotate the tetromino shape 90 degrees clockwise.
-        """
-        # Transpose the shape matrix and then reverse each row to achieve a 90-degree rotation
-        self.shape = [list(row) for row in zip(*self.shape[::-1])]
-
-    def __str__(self):
-        """
-        Return a string representation of the tetromino for debugging.
-        """
-        return '\n'.join([''.join(row) for row in self.shape])
 
 

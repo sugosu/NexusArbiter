@@ -1,6 +1,7 @@
+# core/config/run_config.py
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Optional, Dict, Any
 import json
@@ -23,9 +24,6 @@ class RunItem:
     target_file: Optional[str]
     allowed_actions: List[str]
 
-    # Optional provider override (string: "openai", "gemini", ...)
-    provider: Optional[str] = None
-
     # These fields apply ONLY to validator runs.
     # Code-generation runs must leave them as None.
     strategy_index: Optional[int] = None        # which strategy block to use
@@ -36,11 +34,12 @@ class RunItem:
     retry: Optional[int] = None
     profile_name: Optional[str] = None
 
-
     def is_validator(self) -> bool:
-        return (self.strategy_index is not None) and \
-               (self.target_run is not None) and \
-               (self.strategy_file is not None)
+        return (
+            self.strategy_index is not None
+            and self.target_run is not None
+            and self.strategy_file is not None
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -51,16 +50,18 @@ class RunItem:
 class RunConfig:
     """
     Represents the parsed content of the run configuration JSON.
+
+    NOTE: Provider is intentionally NOT stored here anymore.
+          Provider is now taken from profile files only (or strategy overrides).
     """
 
-    provider: Optional[str]
     runs: List[RunItem]
     retry_policy: Optional[Dict[str, Any]] = None
 
     @staticmethod
     def from_file(path: Path | str) -> "RunConfig":
         """
-        Load and parse runs.json
+        Load and parse runs.json.
         """
         if isinstance(path, str):
             path = Path(path)
@@ -68,11 +69,11 @@ class RunConfig:
         with path.open("r", encoding="utf-8") as f:
             raw = json.load(f)
 
-        provider = raw.get("provider")
+        # Top-level `provider` is ignored now (backwards-compatible).
         retry_policy = raw.get("retry_policy")
 
         runs_section = raw.get("runs", [])
-        runs = []
+        runs: List[RunItem] = []
 
         for r in runs_section:
             run_item = RunItem(
@@ -83,18 +84,19 @@ class RunConfig:
                 target_file=r.get("target_file"),
                 allowed_actions=r.get("allowed_actions", []),
 
-                provider=r.get("provider"),
+                # Validator-only fields:
                 strategy_index=r.get("strategy_index"),
                 target_run=r.get("target_run"),
                 strategy_file=r.get("strategy_file"),
 
+                # Misc metadata:
                 retry=r.get("retry"),
                 profile_name=r.get("profile_name"),
             )
             runs.append(run_item)
 
         return RunConfig(
-            provider=provider,
             runs=runs,
-            retry_policy=retry_policy
+            retry_policy=retry_policy,
         )
+    

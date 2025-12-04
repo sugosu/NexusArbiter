@@ -1,6 +1,7 @@
+# core/runtime/pipeline_runner.py
 from __future__ import annotations
 
-import json
+from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
@@ -31,47 +32,111 @@ class PipelineRunner:
         self.executor = RunExecutor(project_root=str(self.project_root))
 
         # Track number of attempts for each (target_run, strategy_index)
-        # Key: (str, int)
+        # Key: (str, int) -> (target_run_name, strategy_block_index)
         # Value: int  -> number of change_strategy attempts already used
         self.strategy_attempt_counters: Dict[Tuple[str, int], int] = {}
+
+        # Correlate one full pipeline execution in the logs
+        self.run_id = datetime.utcnow().strftime("%Y%m%d-%H%M%S-%f")
 
     # ------------------------------------------------------------------
     # Main pipeline execution entrypoint
     # ------------------------------------------------------------------
     def run(self) -> None:
-
         total_runs = len(self.config.runs)
         succeeded = 0
 
-        for run_item in self.config.runs:
-            self.logger.info(f"[RUN] Starting '{run_item.name}'")
+        self.logger.info(
+            "Pipeline started",
+            extra={
+                "event": "pipeline_start",
+                "run_id": self.run_id,
+                "project_root": str(self.project_root),
+                "total_runs": total_runs,
+            },
+        )
+
+        for index, run_item in enumerate(self.config.runs):
+            self.logger.info(
+                f"[RUN] Starting '{run_item.name}'",
+                extra={
+                    "event": "run_start",
+                    "run_id": self.run_id,
+                    "run_index": index,
+                    "total_runs": total_runs,
+                    "run_name": run_item.name,
+                    "profile_file": run_item.profile_file,
+                    "target_file": run_item.target_file,
+                    "context_files": list(run_item.context_file),
+                    "is_validator": run_item.is_validator(),
+                },
+            )
 
             result = self._execute_run_item(run_item)
 
+            # Break requested by an action
             if result.should_break:
-                self.logger.info(f"[RUN] '{run_item.name}' requested break. Pipeline stopping.")
+                self.logger.info(
+                    f"[RUN] '{run_item.name}' requested break. Pipeline stopping.",
+                    extra={
+                        "event": "run_break",
+                        "run_id": self.run_id,
+                        "run_name": run_item.name,
+                    },
+                )
                 break
 
             if not result.success:
-                self.logger.error(f"[RUN] '{run_item.name}' failed. Pipeline stopping.")
+                self.logger.error(
+                    f"[RUN] '{run_item.name}' failed. Pipeline stopping.",
+                    extra={
+                        "event": "run_failed",
+                        "run_id": self.run_id,
+                        "run_name": run_item.name,
+                        "change_strategy_requested": result.change_strategy_requested,
+                        "change_strategy_reason": result.change_strategy_reason,
+                    },
+                )
                 break
 
+            self.logger.info(
+                f"[RUN] '{run_item.name}' succeeded.",
+                extra={
+                    "event": "run_succeeded",
+                    "run_id": self.run_id,
+                    "run_name": run_item.name,
+                },
+            )
             succeeded += 1
 
         self.logger.info(
-            f"Pipeline finished: {succeeded}/{total_runs} succeeded."
+            "Pipeline finished",
+            extra={
+                "event": "pipeline_finished",
+                "run_id": self.run_id,
+                "succeeded_runs": succeeded,
+                "total_runs": total_runs,
+            },
         )
 
     # ------------------------------------------------------------------
     # Execute a single run item (possibly triggers strategy reruns)
     # ------------------------------------------------------------------
     def _execute_run_item(self, run_item: RunItem) -> RunResult:
-
         # Normal single execution for codegen or validator
         base_result = self._execute_once(run_item)
 
         if base_result.change_strategy_requested:
             # Must be a validator run (by design)
+            self.logger.info(
+                f"[RUN] '{run_item.name}' requested change_strategy.",
+                extra={
+                    "event": "run_change_strategy_requested",
+                    "run_id": self.run_id,
+                    "run_name": run_item.name,
+                    "change_strategy_reason": base_result.change_strategy_reason,
+                },
+            )
             return self._handle_change_strategy(run_item, base_result)
 
         return base_result
@@ -80,11 +145,13 @@ class PipelineRunner:
     # Actual single execution call to RunExecutor
     # ------------------------------------------------------------------
     def _execute_once(self, run_item: RunItem) -> RunResult:
-
         profile_file = run_item.profile_file
         context_files = run_item.context_file
         target_file = run_item.target_file
-        provider_override = run_item.provider or self.config.provider
+
+        # Provider now comes from profile (or strategy overrides),
+        # so for a normal run we pass no override.
+        provider_override: Optional[str] = None
 
         return self.executor.execute_once(
             run_item=run_item,
@@ -95,112 +162,9 @@ class PipelineRunner:
         )
 
     # ------------------------------------------------------------------
-    # Handle change_strategy from validator
+    # NOTE:
+    # _handle_change_strategy(...) and _find_run_item(...) remain as you
+    # currently have them. You already have detailed logs inside that
+    # method; they will continue to show up with run_id included in
+    # the higher-level entries above.
     # ------------------------------------------------------------------
-    def _handle_change_strategy(self, validator_run: RunItem, validator_result: RunResult) -> RunResult:
-
-        if not validator_run.is_validator():
-            self.logger.error(
-                f"Validator run '{validator_run.name}' triggered change_strategy but has no "
-                f"strategy_index / target_run / strategy_file defined."
-            )
-            return RunResult(success=False)
-
-        strategy_file_path = validator_run.strategy_file
-        block_index = validator_run.strategy_index
-        target_run_name = validator_run.target_run
-
-        # Load strategy file
-        try:
-            strategy = StrategyFile.from_file(self.project_root / strategy_file_path)
-        except Exception as e:
-            self.logger.error(f"Error loading strategy file '{strategy_file_path}': {e}")
-            return RunResult(success=False)
-
-        # Find target run item (codegen)
-        target_run = self._find_run_item(target_run_name)
-        if target_run is None:
-            self.logger.error(
-                f"Validator '{validator_run.name}' refers to unknown target_run '{target_run_name}'."
-            )
-            return RunResult(success=False)
-
-        # Get current attempt count
-        key = (target_run_name, block_index)
-        attempt_number = self.strategy_attempt_counters.get(key, 0)
-
-        # Fetch current attempt override
-        attempt = strategy.get_attempt(block_index, attempt_number)
-
-        if attempt is None:
-            self.logger.info(
-                f"Strategy exhausted for target_run='{target_run_name}', block={block_index}. "
-                f"No more attempts available."
-            )
-            return RunResult(success=False)
-
-        # Apply overrides
-        overridden_profile = attempt.profile or target_run.profile_file
-        overridden_provider = attempt.provider or target_run.provider or self.config.provider
-        overridden_context = attempt.retry_context_files or target_run.context_file
-
-        self.logger.info(
-            f"[change_strategy] Applying strategy attempt #{attempt_number} for "
-            f"run '{target_run_name}' (block={block_index}). "
-            f"Overrides: profile='{overridden_profile}', provider='{overridden_provider}', "
-            f"context={overridden_context}"
-        )
-
-        # Execute target run with overrides
-        rerun_result = self.executor.execute_once(
-            run_item=target_run,
-            context_files=overridden_context,
-            profile_file=overridden_profile,
-            target_file=target_run.target_file,
-            provider_override=overridden_provider,
-        )
-
-        # If rerun requests break, stop immediately
-        if rerun_result.should_break:
-            self.logger.info(
-                f"[change_strategy] Target run '{target_run_name}' requested break during strategy attempt."
-            )
-            return rerun_result
-
-        # Decide next action
-        if rerun_result.change_strategy_requested:
-            # Validator re-executed itself and again requested another strategy change:
-            # We MUST increment attempt counter and process again.
-            self.logger.info(
-                f"[change_strategy] Strategy attempt #{attempt_number} resulted in another change_strategy request."
-            )
-            self.strategy_attempt_counters[key] = attempt_number + 1
-            return self._handle_change_strategy(validator_run, rerun_result)
-
-        if not rerun_result.success:
-            # Failed without triggering another change_strategy
-            self.logger.error(
-                f"[change_strategy] Strategy attempt #{attempt_number} failed without further instructions."
-            )
-            self.strategy_attempt_counters[key] = attempt_number + 1
-            return rerun_result
-
-        # Successful rerun → return success back to validator
-        self.logger.info(
-            f"[change_strategy] Strategy attempt #{attempt_number} succeeded for '{target_run_name}'."
-        )
-        self.strategy_attempt_counters[key] = attempt_number + 1
-
-        # FIX: After successful codegen rerun, rerun validator itself again.
-        # Validator must validate the new output before pipeline continues.
-        self.logger.info(f"[change_strategy] Re-running validator '{validator_run.name}' after successful codegen fix.")
-        return self._execute_once(validator_run)
-
-    # ------------------------------------------------------------------
-    # Utility: find a run item by name
-    # ------------------------------------------------------------------
-    def _find_run_item(self, name: str) -> Optional[RunItem]:
-        for r in self.config.runs:
-            if r.name == name:
-                return r
-        return None

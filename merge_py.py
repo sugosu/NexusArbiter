@@ -2,15 +2,24 @@ import os
 import json
 
 OUTPUT_NAME = "merged_all.txt"
+LICENSE_NAME = "LICENSE"   # <--- added
 
 def collect_all_files(root_dir, output_name):
     files = []
     for dirpath, _, filenames in os.walk(root_dir):
         for fname in filenames:
-            # include .py and .json but skip output file
+
+            # Include LICENSE explicitly
+            if fname == LICENSE_NAME:
+                full_path = os.path.join(dirpath, fname)
+                files.append(full_path)
+                continue
+
+            # Include .py and .json but skip output file
             if fname.endswith((".py", ".json")) and fname != output_name:
                 full_path = os.path.join(dirpath, fname)
                 files.append(full_path)
+
     return files
 
 

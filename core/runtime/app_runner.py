@@ -1,3 +1,4 @@
+# core/runtime/app_runner.py
 from __future__ import annotations
 
 import json
@@ -9,6 +10,7 @@ from core.actions.registry import ActionRegistry
 from core.actions.base_action import ActionContext, BaseAction
 from core.ai_client.openai_client import OpenAIClient
 from core.ai_client.ai_response_parser import AIResponseParser
+from core.ai_client.gemini_client import GeminiClient
 
 
 class AppRunner:
@@ -16,7 +18,7 @@ class AppRunner:
     Responsible for:
         - loading the profile JSON
         - assembling model input payload
-        - calling the correct provider (currently OpenAI)
+        - calling the correct provider (OpenAI, Gemini, ...)
         - parsing model output into actions
         - filtering allowed actions
         - executing actions in order
@@ -45,13 +47,22 @@ class AppRunner:
     ) -> ActionContext:
         """
         Execute a single run step. This is called by RunExecutor.
+
+        Provider resolution order:
+            1) provider_override   (strategy attempt)
+            2) profile["provider"] (profile JSON)
+            3) "openai" (default)
         """
 
+        # Load profile JSON
         resolved_profile = self._load_profile(profile_file)
-        provider_name = provider_override or run_item.provider
 
+        # Resolve provider
+        provider_name: Optional[str] = provider_override
         if not provider_name:
-            provider_name = "openai"  # default
+            provider_name = resolved_profile.get("provider")
+        if not provider_name:
+            provider_name = "openai"
 
         self.logger.info(
             f"Selected provider '{provider_name}' for profile '{profile_file}' "
@@ -63,7 +74,7 @@ class AppRunner:
             resolved_profile,
             run_item,
             provider_name,
-            context_files
+            context_files,
         )
 
         # Call provider
@@ -88,18 +99,25 @@ class AppRunner:
     # ----------------------------------------------------------------------
     # Internal utilities
     # ----------------------------------------------------------------------
-
     def _load_profile(self, profile_file: str) -> Dict[str, Any]:
-        path = self.project_root / profile_file
-        with path.open("r", encoding="utf-8") as f:
-            return json.load(f)
+        """
+        Load the profile JSON from disk.
+        """
+        profile_path = (self.project_root / profile_file).resolve()
+        with profile_path.open("r", encoding="utf-8") as f:
+            data = json.load(f)
+
+        if not isinstance(data, dict):
+            raise ValueError(f"Profile '{profile_file}' must contain a JSON object.")
+
+        return data
 
     def _build_model_payload(
         self,
         profile_dict: Dict[str, Any],
         run_item: Any,
         provider_name: str,
-        context_files: List[str]
+        context_files: List[str],
     ) -> Dict[str, Any]:
         """
         Merge:
@@ -109,7 +127,6 @@ class AppRunner:
         """
 
         # Inject runtime metadata into the profile
-        # (This mirrors your existing aiAgency logic.)
         profile_dict = dict(profile_dict)  # shallow copy
 
         # Build agent_input
@@ -121,7 +138,7 @@ class AppRunner:
         }
 
         # Construct context block
-        context_blocks = []
+        context_blocks: List[str] = []
         for cf in context_files:
             path = self.project_root / cf
             try:
@@ -136,7 +153,7 @@ class AppRunner:
                 )
 
         # agent_input is placed inside the request
-        payload = {
+        payload: Dict[str, Any] = {
             "model": profile_dict.get("model"),
             "temperature": profile_dict.get("temperature", 0),
             "top_p": profile_dict.get("top_p", 1),
@@ -145,13 +162,29 @@ class AppRunner:
                 profile_dict.get("messages", []),
                 agent_input,
                 context_blocks,
-                run_item.task_description,
+                getattr(run_item, "task_description", None),
             ),
-            "response_format": profile_dict.get("response_format", {"type": "json_object"}),
+            "response_format": profile_dict.get(
+                "response_format", {"type": "json_object"}
+            ),
             "user": profile_dict.get("user", "${default_user}"),
         }
 
-        self.logger.info("Starting model call via provider '%s'." % provider_name)
+        self.logger.info(
+            "Prepared model payload",
+            extra={
+                "event": "model_payload_built",
+                "run_name": getattr(run_item, "name", None),
+                "provider": provider_name,
+                "model": payload.get("model"),
+                "temperature": payload.get("temperature"),
+                "max_tokens": payload.get("max_tokens"),
+                "num_messages": len(payload.get("messages", [])),
+                "num_context_files": len(context_files),
+            },
+        )
+
+        self.logger.info("Starting model call via provider '%s'.", provider_name)
         return payload
 
     def _inject_messages(
@@ -159,18 +192,21 @@ class AppRunner:
         messages: List[Dict[str, Any]],
         agent_input: Dict[str, Any],
         context_blocks: List[str],
-        task_description: Optional[str]
+        task_description: Optional[str],
     ) -> List[Dict[str, Any]]:
         """
-        Replace ${agent_input}, ${context_block} placeholders inside the profile messages.
+        Replace ${agent_input}, ${context_block}, ${task_description}
+        placeholders inside the profile messages.
         """
         ctx_combined = "\n\n".join(context_blocks)
 
-        result = []
+        result: List[Dict[str, Any]] = []
         for msg in messages:
             content = msg.get("content", "")
 
-            content = content.replace("${agent_input}", json.dumps(agent_input, indent=2))
+            content = content.replace(
+                "${agent_input}", json.dumps(agent_input, indent=2)
+            )
             content = content.replace("${context_block}", ctx_combined)
 
             if task_description:
@@ -178,30 +214,69 @@ class AppRunner:
 
             result.append({
                 "role": msg["role"],
-                "content": content
+                "content": content,
             })
         return result
 
     def _invoke_model(self, provider_name: str, payload: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Only OpenAI provider is implemented today.
+        Dispatch to the correct provider client and normalize response
+        into an 'agent' object understood by the action layer.
         """
-        if provider_name != "openai":
-            raise NotImplementedError(f"Provider '{provider_name}' not implemented.")
+        temperature = payload.get("temperature", 0.0)
+        model_name = payload.get("model")
 
-        client = OpenAIClient()
-        response = client.call(payload)
-        return AIResponseParser.extract_agent(response)
+        if provider_name == "openai":
+            client = OpenAIClient()
+            response = client.call(payload)
+            return AIResponseParser.extract_agent(response)
+
+        elif provider_name == "gemini":
+            # HANDLE MODEL NAME MISMATCH:
+            # If the JSON still says "gpt-4o", we default to a gemini model
+            if not model_name or "gpt" in model_name:
+                model_name = "gemini-2.0-flash"
+
+            client = GeminiClient(model=model_name)
+
+            # Extract messages to format prompt
+            messages = payload.get("messages", [])
+            system_instruction = None
+            user_parts: List[str] = []
+
+            for msg in messages:
+                role = msg.get("role")
+                content = msg.get("content", "")
+                if role == "system" and not system_instruction:
+                    system_instruction = content
+                else:
+                    user_parts.append(f"{role.upper()}: {content}")
+
+            final_prompt = "\n\n".join(user_parts)
+
+            response_dict = client.generate_content(
+                prompt=final_prompt,
+                system_instruction=system_instruction,
+                temperature=temperature,
+            )
+
+            # Wrap result to look like an 'agent' object
+            return AIResponseParser.extract_agent(
+                {"choices": [{"message": {"content": response_dict}}]}
+            )
+
+        else:
+            raise NotImplementedError(f"Provider '{provider_name}' not implemented.")
 
     def _filter_actions(
         self,
         actions: List[Dict[str, Any]],
-        allowed: List[str]
+        allowed: List[str],
     ) -> List[Dict[str, Any]]:
         """
         Keep only actions whose type is allowed by run_item.
         """
-        kept = []
+        kept: List[Dict[str, Any]] = []
         for a in actions:
             if a.get("type") in allowed:
                 kept.append(a)
@@ -211,7 +286,8 @@ class AppRunner:
                 )
         if not kept:
             self.logger.warning(
-                f"No actions left after allowed_actions filter. Original actions: {actions}"
+                f"No actions left after allowed_actions filter. "
+                f"Original actions: {actions}"
             )
         return kept
 
@@ -232,7 +308,7 @@ class AppRunner:
             except Exception as e:
                 ctx.logger.error(
                     f"Exception during action '{action_type}': {e}",
-                    exc_info=True
+                    exc_info=True,
                 )
                 # leave ctx flags as-is; executor will stop run.
                 break

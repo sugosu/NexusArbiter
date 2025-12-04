@@ -1,7 +1,8 @@
+# core/runtime/run_executor.py
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Optional
+from typing import Optional, List
 
 from core.logger import BasicLogger
 from core.runtime.app_runner import AppRunner
@@ -37,7 +38,8 @@ class RunExecutor:
     def __init__(self, project_root: str | None):
         self.project_root = project_root
         self.app_runner = AppRunner(project_root)
-        self.logger = BasicLogger("RunExecutor")
+        # IMPORTANT: use the underlying logging.Logger
+        self.logger = BasicLogger("RunExecutor").get_logger()
 
     # ------------------------------------------------------------------
     # Executes a single run step once (no retry loops here)
@@ -45,11 +47,23 @@ class RunExecutor:
     def execute_once(
         self,
         run_item: RunItem,
-        context_files: list[str],
+        context_files: List[str],
         profile_file: str,
         target_file: str | None,
-        provider_override: str | None
+        provider_override: str | None,
     ) -> RunResult:
+
+        self.logger.info(
+            "[RunExecutor] Starting run step",
+            extra={
+                "event": "run_step_start",
+                "run_name": run_item.name,
+                "profile_file": profile_file,
+                "target_file": target_file,
+                "context_files": list(context_files),
+                "provider_override": provider_override,
+            },
+        )
 
         ctx = self.app_runner.run_single(
             run_item=run_item,
@@ -59,12 +73,23 @@ class RunExecutor:
             provider_override=provider_override,
         )
 
-        # Convert ctx flags → RunResult
         result = RunResult(
             success=not ctx.change_strategy_requested and not ctx.should_break,
             change_strategy_requested=ctx.change_strategy_requested,
             change_strategy_reason=ctx.change_strategy_reason,
             should_break=ctx.should_break,
+        )
+
+        self.logger.info(
+            "[RunExecutor] Completed run step",
+            extra={
+                "event": "run_step_end",
+                "run_name": run_item.name,
+                "success": result.success,
+                "change_strategy_requested": result.change_strategy_requested,
+                "change_strategy_reason": result.change_strategy_reason,
+                "should_break": result.should_break,
+            },
         )
 
         return result
