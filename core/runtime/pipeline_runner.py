@@ -47,6 +47,11 @@ class PipelineRunner:
         succeeded = 0
 
         self.logger.info(
+    "Warp field stabilized",
+    extra={"event": "warp_stabilized"}
+)
+
+        self.logger.info(
             "Pipeline started",
             extra={
                 "event": "pipeline_start",
@@ -55,6 +60,8 @@ class PipelineRunner:
                 "total_runs": total_runs,
             },
         )
+
+        
 
         for index, run_item in enumerate(self.config.runs):
             self.logger.info(
