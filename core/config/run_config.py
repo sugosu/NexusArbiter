@@ -24,21 +24,25 @@ class RunItem:
     target_file: Optional[str]
     allowed_actions: List[str]
 
-    # These fields apply ONLY to validator runs.
+    # These fields apply ONLY to validator / rerun controller runs.
     # Code-generation runs must leave them as None.
-    strategy_index: Optional[int] = None        # which strategy block to use
-    target_run: Optional[str] = None            # which codegen run to retry
-    strategy_file: Optional[str] = None         # path to strategy .json file
+    rerun_index: Optional[int] = None          # which rerun strategy block to use
+    target_run: Optional[str] = None           # which codegen run to rerun
+    rerun_strategy: Optional[str] = None       # path to rerun strategy .json file
 
     # Reserved for future or profile metadata:
     retry: Optional[int] = None
     profile_name: Optional[str] = None
 
     def is_validator(self) -> bool:
+        """
+        A run is considered a validator/rerun controller if all rerun-related
+        fields are present.
+        """
         return (
-            self.strategy_index is not None
+            self.rerun_index is not None
             and self.target_run is not None
-            and self.strategy_file is not None
+            and self.rerun_strategy is not None
         )
 
 
@@ -52,7 +56,7 @@ class RunConfig:
     Represents the parsed content of the run configuration JSON.
 
     NOTE: Provider is intentionally NOT stored here anymore.
-          Provider is now taken from profile files only (or strategy overrides).
+          Provider is now taken from profile files only (or rerun strategy overrides).
     """
 
     runs: List[RunItem]
@@ -76,6 +80,17 @@ class RunConfig:
         runs: List[RunItem] = []
 
         for r in runs_section:
+            # New preferred keys
+            rerun_index = r.get("rerun_index")
+            rerun_strategy = r.get("rerun_strategy")
+
+            # Backwards compatibility: accept old names if present
+            if rerun_index is None and "strategy_index" in r:
+                rerun_index = r.get("strategy_index")
+
+            if rerun_strategy is None and "strategy_file" in r:
+                rerun_strategy = r.get("strategy_file")
+
             run_item = RunItem(
                 name=r["name"],
                 profile_file=r["profile_file"],
@@ -84,10 +99,10 @@ class RunConfig:
                 target_file=r.get("target_file"),
                 allowed_actions=r.get("allowed_actions", []),
 
-                # Validator-only fields:
-                strategy_index=r.get("strategy_index"),
+                # Validator-only fields (new names)
+                rerun_index=rerun_index,
                 target_run=r.get("target_run"),
-                strategy_file=r.get("strategy_file"),
+                rerun_strategy=rerun_strategy,
 
                 # Misc metadata:
                 retry=r.get("retry"),
@@ -99,4 +114,3 @@ class RunConfig:
             runs=runs,
             retry_policy=retry_policy,
         )
-    

@@ -1,11 +1,3 @@
-Understood.
-You want **the entire README.md ONLY inside one single fenced code block**, with **no text outside**, so you can copy-paste cleanly.
-
-Here it is.
-Everything below is **exactly** the README.md content and nothing else.
-
----
-
 ````markdown
 # AgentArbiter
 
@@ -71,7 +63,7 @@ Pipelines become portable, deterministic, and version-controlled.
 
 ### Strategy Arbitration & Retry Engine
 AgentArbiter supports structured AI-driven decision arbitration:
-- strategy files  
+- rerun strategy files  
 - retry logic  
 - provider overrides  
 - allowed-actions filters  
@@ -365,12 +357,3 @@ Contributions are welcome.
 ## License
 
 MIT License
-
----
-
-## Attribution
-
-AgentArbiter is an independent project and not affiliated with Nethermind’s “ArbiterAgent” or AgentArena.
-Terminology overlap reflects common language in multi-agent orchestration systems.
-
-```

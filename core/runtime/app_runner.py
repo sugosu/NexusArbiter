@@ -232,8 +232,7 @@ class AppRunner:
             return AIResponseParser.extract_agent(response)
 
         elif provider_name == "gemini":
-            # HANDLE MODEL NAME MISMATCH:
-            # If the JSON still says "gpt-4o", we default to a gemini model
+            # If the JSON still says an OpenAI model, default to a Gemini model
             if not model_name or "gpt" in model_name:
                 model_name = "gemini-2.0-flash"
 
@@ -250,23 +249,76 @@ class AppRunner:
                 if role == "system" and not system_instruction:
                     system_instruction = content
                 else:
+                    # Keep it simple: ROLE: content
                     user_parts.append(f"{role.upper()}: {content}")
 
             final_prompt = "\n\n".join(user_parts)
 
+            # Map OpenAI-style response_format → Gemini structured output schema
+            response_schema: Optional[Dict[str, Any]] = None
+            response_format = payload.get("response_format")
+
+            if isinstance(response_format, dict) and response_format.get("type") == "json_object":
+                # Minimal schema for:
+                # {
+                #   "agent": {
+                #     "actions": [
+                #       {
+                #         "type": "file_write",
+                #         "params": { "target_path": "...", "code": "..." }
+                #       }
+                #     ]
+                #   }
+                # }
+                # IMPORTANT: no `additionalProperties` – Gemini API does not support it.
+                response_schema = {
+                    "type": "object",
+                    "properties": {
+                        "agent": {
+                            "type": "object",
+                            "properties": {
+                                "actions": {
+                                    "type": "array",
+                                    "items": {
+                                        "type": "object",
+                                        "properties": {
+                                            "type": {"type": "string"},
+                                            "params": {
+                                                "type": "object",
+                                                "properties": {
+                                                    "target_path": {"type": "string"},
+                                                    "code": {"type": "string"},
+                                                },
+                                                "required": ["code"],
+                                            },
+                                        },
+                                        "required": ["type", "params"],
+                                    },
+                                }
+                            },
+                            "required": ["actions"],
+                        }
+                    },
+                    "required": ["agent"],
+                }
+
             response_dict = client.generate_content(
                 prompt=final_prompt,
                 system_instruction=system_instruction,
+                response_schema=response_schema,
                 temperature=temperature,
             )
 
-            # Wrap result to look like an 'agent' object
+            # Normalize to the shape AIResponseParser expects
             return AIResponseParser.extract_agent(
                 {"choices": [{"message": {"content": response_dict}}]}
             )
 
         else:
             raise NotImplementedError(f"Provider '{provider_name}' not implemented.")
+
+
+
 
     def _filter_actions(
         self,

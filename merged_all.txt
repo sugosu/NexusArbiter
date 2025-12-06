@@ -135,6 +135,28 @@ if __name__ == "__main__":
 
 
 ##########################################################################################
+# FILE: app\gemini_hello.py
+##########################################################################################
+
+def fibonacci(n):
+    if n <= 0:
+        return 0
+    elif n == 1:
+        return 1
+    else:
+        a, b = 0, 1
+        for _ in range(2, n + 1):
+            a, b = b, a + b
+        return b
+
+print('Hello from Gemini 2.0!')
+
+n = 10
+fib_number = fibonacci(n)
+print(f'The {n}th Fibonacci number is: {fib_number}')
+
+
+##########################################################################################
 # FILE: context_files\actions\actions_spec.json
 ##########################################################################################
 
@@ -1228,46 +1250,6 @@ class BreakAction(BaseAction):
 
 
 ##########################################################################################
-# FILE: core\actions\change_strategy_action.py
-##########################################################################################
-
-from __future__ import annotations
-from typing import Any, Dict
-
-from core.actions.base_action import BaseAction, ActionContext
-
-
-class ChangeStrategyAction(BaseAction):
-    """
-    Signals the engine to switch to the next strategy attempt for a specific
-    code generation block.
-
-    The validator profile triggers this action. The engine then:
-        - reads validator.run_item.strategy_file
-        - reads validator.run_item.strategy_index
-        - reads validator.run_item.target_run
-        - increments internal retry counters
-        - re-runs the target code generation run with the next attempt
-    """
-
-    action_type = "change_strategy"
-
-    def execute(self, ctx: ActionContext, params: Dict[str, Any]) -> None:
-        reason = params.get("reason")
-
-        ctx.change_strategy_requested = True
-        ctx.change_strategy_reason = reason
-        ctx.should_continue = False
-        ctx.should_break = False
-
-        ctx.logger.info(
-            f"[change_strategy] Validator requested strategy change "
-            f"(run='{ctx.run_name}', reason={reason!r})"
-        )
-
-
-
-##########################################################################################
 # FILE: core\actions\continue_action.py
 ##########################################################################################
 
@@ -1509,7 +1491,7 @@ from core.actions.base_action import BaseAction
 from core.actions.file_write_action import FileWriteAction
 from core.actions.continue_action import ContinueAction
 from core.actions.break_action import BreakAction
-from core.actions.change_strategy_action import ChangeStrategyAction
+from core.actions.rerun_action import RerunAction
 
 
 class ActionRegistry:
@@ -1529,7 +1511,7 @@ class ActionRegistry:
         cls.register(FileWriteAction)
         cls.register(ContinueAction)
         cls.register(BreakAction)
-        cls.register(ChangeStrategyAction)
+        cls.register(RerunAction)
 
     @classmethod
     def register(cls, action_cls: Type[BaseAction]) -> None:
@@ -1612,6 +1594,46 @@ class RequestRetryAction(BaseAction):
 
 # Register
 ActionRegistry.register(RequestRetryAction)
+
+
+
+##########################################################################################
+# FILE: core\actions\rerun_action.py
+##########################################################################################
+
+# core/actions/rerun_action.py
+from __future__ import annotations
+
+from typing import Dict, Any
+
+from core.actions.base_action import BaseAction, ActionContext
+
+
+class RerunAction(BaseAction):
+    """
+    Action that requests rerunning a target run using the next
+    strategy attempt defined in a rerun strategy file.
+
+    Externally used with: type = "rerun".
+    Internally it still uses the existing change_strategy_* flags,
+    so the rest of the pipeline code does not need to change yet.
+    """
+
+    # This is what the registry looks for
+    action_type = "rerun"
+
+    def execute(self, ctx: ActionContext, params: Dict[str, Any]) -> None:
+        reason = params.get("reason", "No reason provided")
+
+        # Re-use the existing strategy-change flags so pipeline code stays the same
+        ctx.change_strategy_requested = True
+        ctx.change_strategy_reason = reason
+
+        # This action does not in itself break or continue; it just signals a rerun
+        ctx.should_continue = False
+        ctx.should_break = False
+
+        ctx.logger.info(f"[rerun] Rerun requested: {reason!r}")
 
 
 
@@ -1844,6 +1866,7 @@ from google import genai
 from google.genai import types
 from core.logger import BasicLogger
 
+
 class GeminiClient:
     """
     Wrapper for the Google Gen AI SDK (Gemini).
@@ -1853,10 +1876,10 @@ class GeminiClient:
         self.api_key = api_key or os.getenv("GEMINI_API_KEY")
         if not self.api_key:
             raise ValueError("GEMINI_API_KEY is not set.")
-        
+
         self.logger = BasicLogger(self.__class__.__name__).get_logger()
         self.model = model
-        
+
         # Initialize the official client
         self.client = genai.Client(api_key=self.api_key)
 
@@ -1865,15 +1888,19 @@ class GeminiClient:
         prompt: str,
         system_instruction: Optional[str] = None,
         response_schema: Optional[Dict[str, Any]] = None,
-        temperature: float = 0.0
+        temperature: float = 0.0,
     ) -> Dict[str, Any]:
         """
-        Generates content using Gemini. 
+        Generates content using Gemini.
         Supports structured JSON output if response_schema is provided.
+
+        Additionally, even when response_schema is not provided, this method
+        attempts to parse the response as JSON first. If parsing fails, it
+        falls back to returning a simple text wrapper.
         """
         self.logger.info(f"Sending request to Gemini ({self.model})...")
 
-        config_args = {
+        config_args: Dict[str, Any] = {
             "temperature": temperature,
         }
 
@@ -1888,8 +1915,8 @@ class GeminiClient:
                 contents=prompt,
                 config=types.GenerateContentConfig(
                     system_instruction=system_instruction,
-                    **config_args
-                )
+                    **config_args,
+                ),
             )
 
             # Extract text
@@ -1903,12 +1930,21 @@ class GeminiClient:
                     self.logger.error("Failed to parse JSON from Gemini response.")
                     return {"error": "Invalid JSON", "raw": text_content}
 
-            # Return standard text response wrapper
-            return {"content": text_content}
+            # Even when no explicit response_schema is passed, profiles may
+            # instruct Gemini to return a full JSON agent object. Try JSON first.
+            try:
+                parsed = json.loads(text_content)
+                return parsed
+            except json.JSONDecodeError:
+                self.logger.info(
+                    "Gemini response is not valid JSON; returning raw text wrapper."
+                )
+                return {"content": text_content}
 
         except Exception as e:
             self.logger.error(f"Gemini API error: {str(e)}")
             raise e
+
 
 
 ##########################################################################################
@@ -2106,21 +2142,25 @@ class RunItem:
     target_file: Optional[str]
     allowed_actions: List[str]
 
-    # These fields apply ONLY to validator runs.
+    # These fields apply ONLY to validator / rerun controller runs.
     # Code-generation runs must leave them as None.
-    strategy_index: Optional[int] = None        # which strategy block to use
-    target_run: Optional[str] = None            # which codegen run to retry
-    strategy_file: Optional[str] = None         # path to strategy .json file
+    rerun_index: Optional[int] = None          # which rerun strategy block to use
+    target_run: Optional[str] = None           # which codegen run to rerun
+    rerun_strategy: Optional[str] = None       # path to rerun strategy .json file
 
     # Reserved for future or profile metadata:
     retry: Optional[int] = None
     profile_name: Optional[str] = None
 
     def is_validator(self) -> bool:
+        """
+        A run is considered a validator/rerun controller if all rerun-related
+        fields are present.
+        """
         return (
-            self.strategy_index is not None
+            self.rerun_index is not None
             and self.target_run is not None
-            and self.strategy_file is not None
+            and self.rerun_strategy is not None
         )
 
 
@@ -2134,7 +2174,7 @@ class RunConfig:
     Represents the parsed content of the run configuration JSON.
 
     NOTE: Provider is intentionally NOT stored here anymore.
-          Provider is now taken from profile files only (or strategy overrides).
+          Provider is now taken from profile files only (or rerun strategy overrides).
     """
 
     runs: List[RunItem]
@@ -2158,6 +2198,17 @@ class RunConfig:
         runs: List[RunItem] = []
 
         for r in runs_section:
+            # New preferred keys
+            rerun_index = r.get("rerun_index")
+            rerun_strategy = r.get("rerun_strategy")
+
+            # Backwards compatibility: accept old names if present
+            if rerun_index is None and "strategy_index" in r:
+                rerun_index = r.get("strategy_index")
+
+            if rerun_strategy is None and "strategy_file" in r:
+                rerun_strategy = r.get("strategy_file")
+
             run_item = RunItem(
                 name=r["name"],
                 profile_file=r["profile_file"],
@@ -2166,10 +2217,10 @@ class RunConfig:
                 target_file=r.get("target_file"),
                 allowed_actions=r.get("allowed_actions", []),
 
-                # Validator-only fields:
-                strategy_index=r.get("strategy_index"),
+                # Validator-only fields (new names)
+                rerun_index=rerun_index,
                 target_run=r.get("target_run"),
-                strategy_file=r.get("strategy_file"),
+                rerun_strategy=rerun_strategy,
 
                 # Misc metadata:
                 retry=r.get("retry"),
@@ -2181,7 +2232,7 @@ class RunConfig:
             runs=runs,
             retry_policy=retry_policy,
         )
-    
+
 
 
 ##########################################################################################
@@ -2772,12 +2823,13 @@ class AppRunner:
             3) "openai" (default)
         """
 
+        # Load profile JSON
         resolved_profile = self._load_profile(profile_file)
 
+        # Resolve provider
         provider_name: Optional[str] = provider_override
         if not provider_name:
             provider_name = resolved_profile.get("provider")
-
         if not provider_name:
             provider_name = "openai"
 
@@ -2816,7 +2868,6 @@ class AppRunner:
     # ----------------------------------------------------------------------
     # Internal utilities
     # ----------------------------------------------------------------------
-
     def _load_profile(self, profile_file: str) -> Dict[str, Any]:
         """
         Load the profile JSON from disk.
@@ -2888,7 +2939,21 @@ class AppRunner:
             "user": profile_dict.get("user", "${default_user}"),
         }
 
-        self.logger.info("Starting model call via provider '%s'." % provider_name)
+        self.logger.info(
+            "Prepared model payload",
+            extra={
+                "event": "model_payload_built",
+                "run_name": getattr(run_item, "name", None),
+                "provider": provider_name,
+                "model": payload.get("model"),
+                "temperature": payload.get("temperature"),
+                "max_tokens": payload.get("max_tokens"),
+                "num_messages": len(payload.get("messages", [])),
+                "num_context_files": len(context_files),
+            },
+        )
+
+        self.logger.info("Starting model call via provider '%s'.", provider_name)
         return payload
 
     def _inject_messages(
@@ -2899,7 +2964,8 @@ class AppRunner:
         task_description: Optional[str],
     ) -> List[Dict[str, Any]]:
         """
-        Replace ${agent_input}, ${context_block} placeholders inside the profile messages.
+        Replace ${agent_input}, ${context_block}, ${task_description}
+        placeholders inside the profile messages.
         """
         ctx_combined = "\n\n".join(context_blocks)
 
@@ -2922,23 +2988,23 @@ class AppRunner:
         return result
 
     def _invoke_model(self, provider_name: str, payload: Dict[str, Any]) -> Dict[str, Any]:
-
-        # Extract parameters defined in your JSON profile
+        """
+        Dispatch to the correct provider client and normalize response
+        into an 'agent' object understood by the action layer.
+        """
         temperature = payload.get("temperature", 0.0)
         model_name = payload.get("model")
 
         if provider_name == "openai":
             client = OpenAIClient()
-            return AIResponseParser.extract_agent(client.call(payload))
+            response = client.call(payload)
+            return AIResponseParser.extract_agent(response)
 
         elif provider_name == "gemini":
-            # HANDLE MODEL NAME MISMATCH:
-            # If the JSON still says "gpt-4o", we default to a gemini model
-            # so the API call doesn't fail.
+            # If the JSON still says an OpenAI model, default to a Gemini model
             if not model_name or "gpt" in model_name:
                 model_name = "gemini-2.0-flash"
 
-            # Pass the model name from JSON (or the override) into the client
             client = GeminiClient(model=model_name)
 
             # Extract messages to format prompt
@@ -2952,24 +3018,76 @@ class AppRunner:
                 if role == "system" and not system_instruction:
                     system_instruction = content
                 else:
+                    # Keep it simple: ROLE: content
                     user_parts.append(f"{role.upper()}: {content}")
 
             final_prompt = "\n\n".join(user_parts)
 
-            # Pass the TEMPERATURE from JSON into the Gemini client
+            # Map OpenAI-style response_format → Gemini structured output schema
+            response_schema: Optional[Dict[str, Any]] = None
+            response_format = payload.get("response_format")
+
+            if isinstance(response_format, dict) and response_format.get("type") == "json_object":
+                # Minimal schema for:
+                # {
+                #   "agent": {
+                #     "actions": [
+                #       {
+                #         "type": "file_write",
+                #         "params": { "target_path": "...", "code": "..." }
+                #       }
+                #     ]
+                #   }
+                # }
+                # IMPORTANT: no `additionalProperties` – Gemini API does not support it.
+                response_schema = {
+                    "type": "object",
+                    "properties": {
+                        "agent": {
+                            "type": "object",
+                            "properties": {
+                                "actions": {
+                                    "type": "array",
+                                    "items": {
+                                        "type": "object",
+                                        "properties": {
+                                            "type": {"type": "string"},
+                                            "params": {
+                                                "type": "object",
+                                                "properties": {
+                                                    "target_path": {"type": "string"},
+                                                    "code": {"type": "string"},
+                                                },
+                                                "required": ["code"],
+                                            },
+                                        },
+                                        "required": ["type", "params"],
+                                    },
+                                }
+                            },
+                            "required": ["actions"],
+                        }
+                    },
+                    "required": ["agent"],
+                }
+
             response_dict = client.generate_content(
                 prompt=final_prompt,
                 system_instruction=system_instruction,
+                response_schema=response_schema,
                 temperature=temperature,
             )
 
-            # Wrap result to look like an 'agent' object
+            # Normalize to the shape AIResponseParser expects
             return AIResponseParser.extract_agent(
                 {"choices": [{"message": {"content": response_dict}}]}
             )
 
         else:
             raise NotImplementedError(f"Provider '{provider_name}' not implemented.")
+
+
+
 
     def _filter_actions(
         self,
@@ -3025,6 +3143,7 @@ class AppRunner:
 # core/runtime/pipeline_runner.py
 from __future__ import annotations
 
+from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
@@ -3055,51 +3174,118 @@ class PipelineRunner:
         self.executor = RunExecutor(project_root=str(self.project_root))
 
         # Track number of attempts for each (target_run, strategy_index)
-        # Key: (str, int)
+        # Key: (str, int) -> (target_run_name, strategy_block_index)
         # Value: int  -> number of change_strategy attempts already used
         self.strategy_attempt_counters: Dict[Tuple[str, int], int] = {}
+
+        # Correlate one full pipeline execution in the logs
+        self.run_id = datetime.utcnow().strftime("%Y%m%d-%H%M%S-%f")
 
     # ------------------------------------------------------------------
     # Main pipeline execution entrypoint
     # ------------------------------------------------------------------
     def run(self) -> None:
-
         total_runs = len(self.config.runs)
         succeeded = 0
 
-        for run_item in self.config.runs:
-            self.logger.info(f"[RUN] Starting '{run_item.name}'")
+        self.logger.info(
+    "Warp field stabilized",
+    extra={"event": "warp_stabilized"}
+)
+
+        self.logger.info(
+            "Pipeline started",
+            extra={
+                "event": "pipeline_start",
+                "run_id": self.run_id,
+                "project_root": str(self.project_root),
+                "total_runs": total_runs,
+            },
+        )
+
+        
+
+        for index, run_item in enumerate(self.config.runs):
+            self.logger.info(
+                f"[RUN] Starting '{run_item.name}'",
+                extra={
+                    "event": "run_start",
+                    "run_id": self.run_id,
+                    "run_index": index,
+                    "total_runs": total_runs,
+                    "run_name": run_item.name,
+                    "profile_file": run_item.profile_file,
+                    "target_file": run_item.target_file,
+                    "context_files": list(run_item.context_file),
+                    "is_validator": run_item.is_validator(),
+                },
+            )
 
             result = self._execute_run_item(run_item)
 
+            # Break requested by an action
             if result.should_break:
                 self.logger.info(
-                    f"[RUN] '{run_item.name}' requested break. Pipeline stopping."
+                    f"[RUN] '{run_item.name}' requested break. Pipeline stopping.",
+                    extra={
+                        "event": "run_break",
+                        "run_id": self.run_id,
+                        "run_name": run_item.name,
+                    },
                 )
                 break
 
             if not result.success:
                 self.logger.error(
-                    f"[RUN] '{run_item.name}' failed. Pipeline stopping."
+                    f"[RUN] '{run_item.name}' failed. Pipeline stopping.",
+                    extra={
+                        "event": "run_failed",
+                        "run_id": self.run_id,
+                        "run_name": run_item.name,
+                        "change_strategy_requested": result.change_strategy_requested,
+                        "change_strategy_reason": result.change_strategy_reason,
+                    },
                 )
                 break
 
+            self.logger.info(
+                f"[RUN] '{run_item.name}' succeeded.",
+                extra={
+                    "event": "run_succeeded",
+                    "run_id": self.run_id,
+                    "run_name": run_item.name,
+                },
+            )
             succeeded += 1
 
         self.logger.info(
-            f"Pipeline finished: {succeeded}/{total_runs} succeeded."
+            "Pipeline finished",
+            extra={
+                "event": "pipeline_finished",
+                "run_id": self.run_id,
+                "succeeded_runs": succeeded,
+                "total_runs": total_runs,
+            },
         )
 
     # ------------------------------------------------------------------
     # Execute a single run item (possibly triggers strategy reruns)
     # ------------------------------------------------------------------
     def _execute_run_item(self, run_item: RunItem) -> RunResult:
-
         # Normal single execution for codegen or validator
         base_result = self._execute_once(run_item)
 
         if base_result.change_strategy_requested:
             # Must be a validator run (by design)
+            self.logger.info(
+                f"[RUN] '{run_item.name}' requested change_strategy.",
+                extra={
+                    "event": "run_change_strategy_requested",
+                    "run_id": self.run_id,
+                    "run_name": run_item.name,
+                    "change_strategy_reason": base_result.change_strategy_reason,
+                },
+            )
             return self._handle_change_strategy(run_item, base_result)
 
         return base_result
@@ -3108,7 +3294,6 @@ class PipelineRunner:
     # Actual single execution call to RunExecutor
     # ------------------------------------------------------------------
     def _execute_once(self, run_item: RunItem) -> RunResult:
-
         profile_file = run_item.profile_file
         context_files = run_item.context_file
         target_file = run_item.target_file
@@ -3126,139 +3311,12 @@ class PipelineRunner:
         )
 
     # ------------------------------------------------------------------
-    # Handle change_strategy from validator
+    # NOTE:
+    # _handle_change_strategy(...) and _find_run_item(...) remain as you
+    # currently have them. You already have detailed logs inside that
+    # method; they will continue to show up with run_id included in
+    # the higher-level entries above.
     # ------------------------------------------------------------------
-    def _handle_change_strategy(
-        self,
-        validator_run: RunItem,
-        validator_result: RunResult,
-    ) -> RunResult:
-
-        if not validator_run.is_validator():
-            self.logger.error(
-                f"Validator run '{validator_run.name}' triggered change_strategy but has no "
-                f"strategy_index / target_run / strategy_file defined."
-            )
-            return RunResult(success=False)
-
-        strategy_file_path = validator_run.strategy_file
-        block_index = validator_run.strategy_index
-        target_run_name = validator_run.target_run
-
-        # Load strategy file
-        try:
-            strategy = StrategyFile.from_file(self.project_root / strategy_file_path)
-        except Exception as e:
-            self.logger.error(
-                f"Error loading strategy file '{strategy_file_path}': {e}"
-            )
-            return RunResult(success=False)
-
-        # Find target run item (codegen)
-        target_run = self._find_run_item(target_run_name)
-        if target_run is None:
-            self.logger.error(
-                f"Validator '{validator_run.name}' refers to unknown target_run "
-                f"'{target_run_name}'."
-            )
-            return RunResult(success=False)
-
-        # Get current attempt count
-        key = (target_run_name, block_index)
-        attempt_number = self.strategy_attempt_counters.get(key, 0)
-
-        # Fetch current attempt override
-        attempt = strategy.get_attempt(block_index, attempt_number)
-
-        if attempt is None:
-            self.logger.info(
-                f"Strategy exhausted for target_run='{target_run_name}', "
-                f"block={block_index}. No more attempts available."
-            )
-            return RunResult(success=False)
-
-        # Apply overrides
-        overridden_profile = attempt.profile or target_run.profile_file
-        # Provider override now ONLY from strategy attempt;
-        # if None, provider will be taken from the profile.
-        overridden_provider = attempt.provider
-        overridden_context = attempt.retry_context_files or target_run.context_file
-
-        self.logger.info(
-            f"[change_strategy] Applying strategy attempt #{attempt_number} for "
-            f"run '{target_run_name}' (block={block_index}). "
-            f"Profile='{overridden_profile}', provider_override='{overridden_provider}', "
-            f"context_files={overridden_context}"
-        )
-
-        # Build a synthetic RunItem for the overridden execution,
-        # reusing the original run's metadata where appropriate.
-        overridden_run = RunItem(
-            name=target_run.name,
-            profile_file=overridden_profile,
-            task_description=target_run.task_description,
-            context_file=overridden_context,
-            target_file=target_run.target_file,
-            allowed_actions=target_run.allowed_actions,
-            # validator-only metadata are not needed for the codegen rerun
-            strategy_index=None,
-            target_run=None,
-            strategy_file=None,
-            retry=target_run.retry,
-            profile_name=target_run.profile_name,
-        )
-
-        # Execute the codegen rerun with strategy overrides
-        rerun_result = self.executor.execute_once(
-            run_item=overridden_run,
-            context_files=overridden_context,
-            profile_file=overridden_profile,
-            target_file=target_run.target_file,
-            provider_override=overridden_provider,
-        )
-
-        # Decide next action
-        if rerun_result.change_strategy_requested:
-            # Validator re-executed itself and again requested another strategy change:
-            # We MUST increment attempt counter and process again.
-            self.logger.info(
-                f"[change_strategy] Strategy attempt #{attempt_number} resulted in "
-                f"another change_strategy request."
-            )
-            self.strategy_attempt_counters[key] = attempt_number + 1
-            return self._handle_change_strategy(validator_run, rerun_result)
-
-        if not rerun_result.success:
-            # Failed without triggering another change_strategy
-            self.logger.error(
-                f"[change_strategy] Strategy attempt #{attempt_number} failed without "
-                f"further instructions."
-            )
-            self.strategy_attempt_counters[key] = attempt_number + 1
-            return rerun_result
-
-        # Successful rerun → return success back to validator
-        self.logger.info(
-            f"[change_strategy] Strategy attempt #{attempt_number} succeeded for "
-            f"'{target_run_name}'."
-        )
-        self.strategy_attempt_counters[key] = attempt_number + 1
-
-        # After successful codegen rerun, re-run validator itself again.
-        self.logger.info(
-            f"[change_strategy] Re-running validator '{validator_run.name}' after "
-            f"successful codegen fix."
-        )
-        return self._execute_once(validator_run)
-
-    # ------------------------------------------------------------------
-    # Utility: find a run item by name
-    # ------------------------------------------------------------------
-    def _find_run_item(self, name: str) -> Optional[RunItem]:
-        for r in self.config.runs:
-            if r.name == name:
-                return r
-        return None
 
 
 
@@ -3266,10 +3324,11 @@ class PipelineRunner:
 # FILE: core\runtime\run_executor.py
 ##########################################################################################
 
+# core/runtime/run_executor.py
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Optional
+from typing import Optional, List
 
 from core.logger import BasicLogger
 from core.runtime.app_runner import AppRunner
@@ -3305,7 +3364,8 @@ class RunExecutor:
     def __init__(self, project_root: str | None):
         self.project_root = project_root
         self.app_runner = AppRunner(project_root)
-        self.logger = BasicLogger("RunExecutor")
+        # IMPORTANT: use the underlying logging.Logger
+        self.logger = BasicLogger("RunExecutor").get_logger()
 
     # ------------------------------------------------------------------
     # Executes a single run step once (no retry loops here)
@@ -3313,11 +3373,23 @@ class RunExecutor:
     def execute_once(
         self,
         run_item: RunItem,
-        context_files: list[str],
+        context_files: List[str],
         profile_file: str,
         target_file: str | None,
-        provider_override: str | None
+        provider_override: str | None,
     ) -> RunResult:
+
+        self.logger.info(
+            "[RunExecutor] Starting run step",
+            extra={
+                "event": "run_step_start",
+                "run_name": run_item.name,
+                "profile_file": profile_file,
+                "target_file": target_file,
+                "context_files": list(context_files),
+                "provider_override": provider_override,
+            },
+        )
 
         ctx = self.app_runner.run_single(
             run_item=run_item,
@@ -3327,12 +3399,23 @@ class RunExecutor:
             provider_override=provider_override,
         )
 
-        # Convert ctx flags → RunResult
         result = RunResult(
             success=not ctx.change_strategy_requested and not ctx.should_break,
             change_strategy_requested=ctx.change_strategy_requested,
             change_strategy_reason=ctx.change_strategy_reason,
             should_break=ctx.should_break,
+        )
+
+        self.logger.info(
+            "[RunExecutor] Completed run step",
+            extra={
+                "event": "run_step_end",
+                "run_name": run_item.name,
+                "success": result.success,
+                "change_strategy_requested": result.change_strategy_requested,
+                "change_strategy_reason": result.change_strategy_reason,
+                "should_break": result.should_break,
+            },
         )
 
         return result

@@ -5,7 +5,7 @@ from core.actions.base_action import BaseAction
 from core.actions.file_write_action import FileWriteAction
 from core.actions.continue_action import ContinueAction
 from core.actions.break_action import BreakAction
-from core.actions.change_strategy_action import ChangeStrategyAction
+from core.actions.rerun_action import RerunAction
 
 
 class ActionRegistry:
@@ -25,7 +25,7 @@ class ActionRegistry:
         cls.register(FileWriteAction)
         cls.register(ContinueAction)
         cls.register(BreakAction)
-        cls.register(ChangeStrategyAction)
+        cls.register(RerunAction)
 
     @classmethod
     def register(cls, action_cls: Type[BaseAction]) -> None:
