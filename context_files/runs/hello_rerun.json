@@ -1,4 +1,11 @@
 {
+  "log_io": {
+    "enabled": true,
+    "log_dir": "logs/io",
+    "request_file_pattern": "{run_name}__{attempt}__request.json",
+    "response_file_pattern": "{run_name}__{attempt}__response.json"
+  },
+
   "retry_policy": {
     "system": {
       "max_attempts": 3,
@@ -7,6 +14,7 @@
       "backoff_seconds": [2, 4, 8]
     }
   },
+
   "runs": [
     {
       "name": "codegen_hello",

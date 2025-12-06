@@ -1,22 +1,46 @@
 # core/config/run_config.py
 from __future__ import annotations
 
-from dataclasses import dataclass
-from pathlib import Path
-from typing import List, Optional, Dict, Any
 import json
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any, Dict, List, Optional
 
 
-# ---------------------------------------------------------------------------
-# Core Run Item representation
-# ---------------------------------------------------------------------------
+# ------------------------------------------------------
+# New dataclass: LogIOSettings
+# ------------------------------------------------------
+@dataclass
+class LogIOSettings:
+    enabled: bool = False
+    log_dir: str = "logs/io"
+    request_file_pattern: str = "{run_name}__{attempt}__request.json"
+    response_file_pattern: str = "{run_name}__{attempt}__response.json"
 
+    @staticmethod
+    def from_dict(data: Optional[Dict[str, Any]]) -> "LogIOSettings":
+        if not data:
+            return LogIOSettings()
+
+        return LogIOSettings(
+            enabled=bool(data.get("enabled", False)),
+            log_dir=data.get("log_dir", "logs/io"),
+            request_file_pattern=data.get(
+                "request_file_pattern",
+                "{run_name}__{attempt}__request.json",
+            ),
+            response_file_pattern=data.get(
+                "response_file_pattern",
+                "{run_name}__{attempt}__response.json",
+            ),
+        )
+
+
+# ------------------------------------------------------
+# RunItem (modified to include log_io override)
+# ------------------------------------------------------
 @dataclass
 class RunItem:
-    """
-    Represents a single entry in runs.json.
-    """
-
     name: str
     profile_file: str
     task_description: Optional[str]
@@ -24,21 +48,25 @@ class RunItem:
     target_file: Optional[str]
     allowed_actions: List[str]
 
-    # These fields apply ONLY to validator / rerun controller runs.
-    # Code-generation runs must leave them as None.
-    rerun_index: Optional[int] = None          # which rerun strategy block to use
-    target_run: Optional[str] = None           # which codegen run to rerun
-    rerun_strategy: Optional[str] = None       # path to rerun strategy .json file
+    # Rerun-related fields
+    rerun_index: Optional[int] = None
+    target_run: Optional[str] = None
+    rerun_strategy: Optional[str] = None
 
-    # Reserved for future or profile metadata:
+    # Legacy backward-compatibility
+    strategy_index: Optional[int] = None
+    strategy_file: Optional[str] = None
+
+    # Optional per-run I/O logging overrides
+    log_io_override: Optional[Dict[str, Any]] = None
+
+    # Provider override (set during rerun)
+    provider_override: Optional[str] = None
+
     retry: Optional[int] = None
     profile_name: Optional[str] = None
 
     def is_validator(self) -> bool:
-        """
-        A run is considered a validator/rerun controller if all rerun-related
-        fields are present.
-        """
         return (
             self.rerun_index is not None
             and self.target_run is not None
@@ -46,71 +74,60 @@ class RunItem:
         )
 
 
-# ---------------------------------------------------------------------------
-# Full Run Configuration (the root of runs.json)
-# ---------------------------------------------------------------------------
-
+# ------------------------------------------------------
+# RunConfig
+# ------------------------------------------------------
 @dataclass
 class RunConfig:
-    """
-    Represents the parsed content of the run configuration JSON.
-
-    NOTE: Provider is intentionally NOT stored here anymore.
-          Provider is now taken from profile files only (or rerun strategy overrides).
-    """
-
-    runs: List[RunItem]
+    runs: List[RunItem] = field(default_factory=list)
     retry_policy: Optional[Dict[str, Any]] = None
 
+    # NEW: global log-io settings
+    log_io_settings: LogIOSettings = field(default_factory=LogIOSettings)
+
     @staticmethod
-    def from_file(path: Path | str) -> "RunConfig":
-        """
-        Load and parse runs.json.
-        """
-        if isinstance(path, str):
-            path = Path(path)
-
+    def from_file(path: str | Path) -> "RunConfig":
+        path = Path(path)
         with path.open("r", encoding="utf-8") as f:
-            raw = json.load(f)
+            data = json.load(f)
 
-        # Top-level `provider` is ignored now (backwards-compatible).
-        retry_policy = raw.get("retry_policy")
+        # Load top-level log_io block
+        log_io_settings = LogIOSettings.from_dict(data.get("log_io"))
 
-        runs_section = raw.get("runs", [])
+        retry_policy = data.get("retry_policy")
+
+        runs_data = data.get("runs", [])
         runs: List[RunItem] = []
 
-        for r in runs_section:
-            # New preferred keys
-            rerun_index = r.get("rerun_index")
-            rerun_strategy = r.get("rerun_strategy")
+        for run_obj in runs_data:
+            # backward compatibility for strategy names
+            rerun_index = run_obj.get("rerun_index", run_obj.get("strategy_index"))
+            rerun_strategy = run_obj.get("rerun_strategy", run_obj.get("strategy_file"))
 
-            # Backwards compatibility: accept old names if present
-            if rerun_index is None and "strategy_index" in r:
-                rerun_index = r.get("strategy_index")
+            item = RunItem(
+                name=run_obj.get("name"),
+                profile_file=run_obj["profile_file"],
+                task_description=run_obj.get("task_description"),
+                context_file=run_obj.get("context_file", []),
+                target_file=run_obj.get("target_file"),
+                allowed_actions=run_obj.get("allowed_actions", []),
 
-            if rerun_strategy is None and "strategy_file" in r:
-                rerun_strategy = r.get("strategy_file")
-
-            run_item = RunItem(
-                name=r["name"],
-                profile_file=r["profile_file"],
-                task_description=r.get("task_description"),
-                context_file=r.get("context_file", []),
-                target_file=r.get("target_file"),
-                allowed_actions=r.get("allowed_actions", []),
-
-                # Validator-only fields (new names)
                 rerun_index=rerun_index,
-                target_run=r.get("target_run"),
+                target_run=run_obj.get("target_run"),
                 rerun_strategy=rerun_strategy,
 
-                # Misc metadata:
-                retry=r.get("retry"),
-                profile_name=r.get("profile_name"),
+                strategy_index=run_obj.get("strategy_index"),
+                strategy_file=run_obj.get("strategy_file"),
+
+                log_io_override=run_obj.get("log_io"),
+                retry=run_obj.get("retry"),
+                profile_name=run_obj.get("profile_name"),
             )
-            runs.append(run_item)
+
+            runs.append(item)
 
         return RunConfig(
             runs=runs,
             retry_policy=retry_policy,
+            log_io_settings=log_io_settings,
         )

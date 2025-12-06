@@ -1,102 +1,176 @@
+# core/ai_client/gemini_client.py
+from __future__ import annotations
+
 import os
 import json
-from typing import Dict, Any, Optional, List
+from typing import Any, Dict, Optional, List
+
 from google import genai
 from google.genai import types
-from core.logger import BasicLogger
-import logging
 
 
 class GeminiClient:
     """
-    Wrapper for the Google Gen AI SDK (Gemini).
+    Thin wrapper around the Google Gen AI (Gemini) SDK.
+
+    This client is designed to work like the OpenAI client in the rest
+    of the framework:
+
+    - It accepts a Chat-Completions-style `payload` dict:
+        {
+          "model": "...",
+          "messages": [...],
+          "temperature": ...,
+          "top_p": ...,
+          "max_tokens": ...,
+          "response_format": {...}
+        }
+
+    - It returns a dict shaped like OpenAI's chat.completions JSON:
+        {
+          "choices": [
+            {
+              "message": {
+                "content": <JSON or text>
+              }
+            }
+          ]
+        }
+
+      so that `AIResponseParser.extract_agent(...)` can be reused.
     """
 
-    def __init__(self, api_key: Optional[str] = None, model: str = "gemini-2.0-flash"):
+    def __init__(self, logger, api_key: Optional[str] = None):
+        self.logger = logger
         self.api_key = api_key or os.getenv("GEMINI_API_KEY")
         if not self.api_key:
             raise ValueError("GEMINI_API_KEY is not set.")
 
-        self.logger = BasicLogger(self.__class__.__name__).get_logger()
-        self.model = model
-        self.logger = BasicLogger(
-            self.__class__.__name__,
-            log_file="openai_client.jsonl",
-        ).get_logger()
-
-        # Initialize the official client
+        # Initialize the official Gemini client
         self.client = genai.Client(api_key=self.api_key)
 
-    def generate_content(
-        self,
-        prompt: str,
-        system_instruction: Optional[str] = None,
-        response_schema: Optional[Dict[str, Any]] = None,
-        temperature: float = 0.0,
-    ) -> Dict[str, Any]:
+    # ------------------------------------------------------------------
+    def send(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Generates content using Gemini.
-        Supports structured JSON output if response_schema is provided.
+        Main entrypoint used by AppRunner.
 
-        Additionally, even when response_schema is not provided, this method
-        attempts to parse the response as JSON first. If parsing fails, it
-        falls back to returning a simple text wrapper.
+        Accepts an OpenAI-style payload and internally:
+        - flattens messages into `system_instruction` + `final_prompt`
+        - configures structured JSON output if response_format.type == 'json_object'
+        - calls Gemini
+        - parses the text into JSON (when possible)
+        - wraps into a Chat-Completions-like dict for AIResponseParser
         """
-        self.logger.info(f"Sending request to Gemini ({self.model})...")
+        self.logger.info("[GeminiClient] Sending request to Gemini...")
 
+        model_name: str = payload.get("model") or "gemini-2.0-flash"
+        temperature: float = payload.get("temperature", 0.0)
+        messages: List[Dict[str, Any]] = payload.get("messages", [])
+        response_format = payload.get("response_format")
+
+        # 1) Extract system_instruction + user prompt (mirrors previous logic)
+        system_instruction: Optional[str] = None
+        user_parts: List[str] = []
+
+        for msg in messages:
+            role = msg.get("role")
+            content = msg.get("content", "")
+            if role == "system" and system_instruction is None:
+                system_instruction = content
+            else:
+                # Keep it simple and robust
+                user_parts.append(f"{role.upper()}: {content}")
+
+        final_prompt = "\n\n".join(user_parts)
+
+        # 2) Map OpenAI-style response_format → Gemini structured output schema
+        response_schema: Optional[Dict[str, Any]] = None
+        if isinstance(response_format, dict) and response_format.get("type") == "json_object":
+            # Minimal schema for:
+            # {
+            #   "agent": {
+            #     "actions": [
+            #       { "type": "...", "params": { "target_path": "...", "code": "..." } }
+            #     ]
+            #   }
+            # }
+            # IMPORTANT: no additionalProperties – Gemini does not support it.
+            response_schema = {
+                "type": "object",
+                "properties": {
+                    "agent": {
+                        "type": "object",
+                        "properties": {
+                            "actions": {
+                                "type": "array",
+                                "items": {
+                                    "type": "object",
+                                    "properties": {
+                                        "type": {"type": "string"},
+                                        "params": {
+                                            "type": "object",
+                                            "properties": {
+                                                "target_path": {"type": "string"},
+                                                "code": {"type": "string"},
+                                            },
+                                            "required": ["code"],
+                                        },
+                                    },
+                                    "required": ["type", "params"],
+                                },
+                            }
+                        },
+                        "required": ["actions"],
+                    }
+                },
+                "required": ["agent"],
+            }
+
+        # 3) Build generation config
         config_args: Dict[str, Any] = {
             "temperature": temperature,
         }
-
-        # Handle Structured Outputs (JSON mode)
-        if response_schema:
+        if response_schema is not None:
             config_args["response_mime_type"] = "application/json"
             config_args["response_schema"] = response_schema
 
-        # DEBUG: Log full outgoing payload (disabled unless DEBUG level is enabled)
-        if self.logger.isEnabledFor(logging.DEBUG):
-            safe_payload = {
-                "model": self.model,
-                "temperature": temperature,
-                "system_instruction": system_instruction,
-                "prompt": prompt,
-                "response_schema": response_schema,
-            }
-            self.logger.debug("FULL REQUEST PAYLOAD (Gemini):\n%s", json.dumps(safe_payload, indent=2))
-
-
         try:
             response = self.client.models.generate_content(
-                model=self.model,
-                contents=prompt,
+                model=model_name,
+                contents=final_prompt,
                 config=types.GenerateContentConfig(
                     system_instruction=system_instruction,
                     **config_args,
                 ),
             )
 
-            # Extract text
             text_content = response.text
 
-            # If we expected JSON, try to parse it to ensure it's valid
-            if response_schema:
-                try:
-                    return json.loads(text_content)
-                except json.JSONDecodeError:
-                    self.logger.error("Failed to parse JSON from Gemini response.")
-                    return {"error": "Invalid JSON", "raw": text_content}
-
-            # Even when no explicit response_schema is passed, profiles may
-            # instruct Gemini to return a full JSON agent object. Try JSON first.
+            # 4) Try to parse JSON first (profiles normally ask for JSON)
+            parsed: Any
             try:
                 parsed = json.loads(text_content)
-                return parsed
             except json.JSONDecodeError:
                 self.logger.info(
-                    "Gemini response is not valid JSON; returning raw text wrapper."
+                    "[GeminiClient] Response is not valid JSON; returning raw text."
                 )
-                return {"content": text_content}
+                parsed = {"content": text_content}
+
+            # 5) Wrap into a Chat-Completions-like envelope so AIResponseParser
+            # can treat it the same way as OpenAI responses.
+            wrapped = {
+                "choices": [
+                    {
+                        "message": {
+                            "content": parsed,
+                        }
+                    }
+                ]
+            }
+
+            self.logger.info("[GeminiClient] Received response.")
+            return wrapped
 
         except Exception as e:
-            self.logger.error(f"Gemini API error: {str(e)}")
-            raise e
+            self.logger.error(f"[GeminiClient] API error: {e}")
+            raise

@@ -2,95 +2,132 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Dict, Tuple
+from typing import Dict, Tuple, Optional, Any, List
 
-from core.logger import BasicLogger
-from core.runtime.run_executor import RunExecutor, RunResult
 from core.config.run_config import RunConfig, RunItem
+from core.runtime.run_executor import RunExecutor, RunResult
 from core.strategy.rerun_strategy import RerunStrategy
+from core.logger import BasicLogger
+
 
 
 class PipelineRunner:
     """
-    Orchestrates execution of the entire runs.json pipeline.
+    Executes a sequence of RunItems from a RunConfig.
 
     Responsibilities:
-    - Execute runs in sequence
-    - Detect rerun (formerly change_strategy) requests from validator runs
-    - Maintain in-memory attempt counters per (validator_run_name, rerun_index)
-    - Load rerun strategy files and apply overrides
-    - Re-run the target codegen run with the correct attempt settings
-    - Respect break signals from actions
+    - Maintain run index.
+    - Track attempt numbers for each run (including reruns).
+    - Delegate execution to RunExecutor.
+    - Handle rerun requests via _handle_change_strategy.
     """
 
-    def __init__(self, project_root: str | Path, config: RunConfig):
+    def __init__(self, project_root: Path, config: RunConfig):
         self.project_root = Path(project_root)
         self.config = config
-        self.logger = BasicLogger(self.__class__.__name__).get_logger()
 
-        # Single-step executor
-        self.executor = RunExecutor(project_root=str(self.project_root))
+        # Tracks how many times each run has been executed:
+        # key = run_item.name -> attempt_number (starting at 1)
+        self._run_attempt_counters: Dict[str, int] = {}
 
-        # (validator_run_name, rerun_index) -> attempt_index
+        # Tracks how many attempts were consumed within a rerun block:
+        # key = (validator_name, rerun_index) -> attempt_index
         self._rerun_attempts: Dict[Tuple[str, int], int] = {}
 
-    # ------------------------------------------------------------------
-    # Public API
-    # ------------------------------------------------------------------
+        # Executor that performs a single run
+        self.executor = RunExecutor(project_root=str(self.project_root))
+
+        # Logger
+        self.logger = BasicLogger("PipelineRunner").get_logger()
+
+    # ----------------------------------------------------------------------
+    # Utilities
+    # ----------------------------------------------------------------------
+    def _increment_attempt(self, run_item: RunItem) -> int:
+        """
+        Increment and return the attempt number for this run.
+        First execution -> attempt = 1, then 2, 3...
+        """
+        name = run_item.name
+        prev = self._run_attempt_counters.get(name, 0)
+        curr = prev + 1
+        self._run_attempt_counters[name] = curr
+        return curr
+
+    def _current_attempt(self, run_item: RunItem) -> int:
+        """
+        Return current attempt counter without incrementing.
+        """
+        return self._run_attempt_counters.get(run_item.name, 0)
+
+    # ----------------------------------------------------------------------
+    # Main run loop
+    # ----------------------------------------------------------------------
     def run(self) -> None:
-        """
-        Execute the pipeline according to the loaded RunConfig.
-        """
-        self.logger.info("Warp field stabilized")
+        self.logger.info("Warp fields stabilized")
         self.logger.info("Pipeline started")
 
-        i = 0
-        total_runs = len(self.config.runs)
+        index = 0
+        runs: List[RunItem] = self.config.runs
 
-        while i < total_runs:
-            run_item = self.config.runs[i]
-            self.logger.info(f"[RUN] Starting '{run_item.name}'")
+        while index < len(runs):
+            run_item = runs[index]
 
-            result = self._execute_run_item(run_item)
+            # Determine attempt number before execution
+            attempt_number = self._increment_attempt(run_item)
 
-            # Break requested: stop whole pipeline
+            self.logger.info(
+                f"[RUN] Starting '{run_item.name}' attempt={attempt_number}"
+            )
+
+            # Execute
+            result = self._execute_run_item(run_item, attempt_number)
+
+            # Pipeline break?
             if result.should_break:
-                self.logger.info(f"[RUN] '{run_item.name}' requested break -> stopping pipeline.")
+                self.logger.info(
+                    f"[BREAK] Pipeline terminated by '{run_item.name}'. Reason={result.change_strategy_reason!r}"
+                )
                 break
 
-            # Rerun requested: apply rerun strategy and stay on same index
+            # Did the run ask for rerun / strategy change?
             if result.change_strategy_requested:
                 self.logger.info(
-                    f"[RUN] '{run_item.name}' requested rerun: {result.change_strategy_reason}"
+                    f"[RERUN] '{run_item.name}' requested strategy change. "
+                    f"Reason={result.change_strategy_reason!r}"
                 )
+
                 rerun_applied = self._handle_change_strategy(run_item)
+
                 if rerun_applied:
-                    # Stay on same run index to re-execute after overrides
+                    # Do NOT increment the index
+                    # Validator will run again on next iteration
                     continue
                 else:
-                    self.logger.warning(
-                        f"[RUN] Rerun requested by '{run_item.name}' but no further attempts remain."
+                    # Strategy exhausted — proceed to next run
+                    self.logger.info(
+                        f"[RERUN] No further attempts left for '{run_item.name}'. Moving on."
                     )
 
-            # Otherwise, proceed to next run
-            self.logger.info(f"[RUN] '{run_item.name}' succeeded.")
-            i += 1
+            # Normal case → go to next
+            index += 1
 
-        self.logger.info("Pipeline finished")
+        self.logger.info("Pipeline completed.")
 
-    # ------------------------------------------------------------------
-    # Single run execution
-    # ------------------------------------------------------------------
-    def _execute_run_item(self, run_item: RunItem) -> RunResult:
+    # ----------------------------------------------------------------------
+    # Run execution wrapper
+    # ----------------------------------------------------------------------
+    def _execute_run_item(self, run_item: RunItem, attempt_number: int) -> RunResult:
         """
-        Execute a single run item using RunExecutor.
+        Creates a RunResult via RunExecutor.
         """
         profile_file = run_item.profile_file
         context_files = run_item.context_file
         target_file = run_item.target_file
 
-        # Provider override can be injected by rerun strategy
         provider_override = getattr(run_item, "provider_override", None)
+
+        log_io_settings = self._merged_log_settings(run_item)
 
         return self.executor.execute_once(
             run_item=run_item,
@@ -98,118 +135,132 @@ class PipelineRunner:
             profile_file=profile_file,
             target_file=target_file,
             provider_override=provider_override,
+            attempt_number=attempt_number,
+            log_io_settings=log_io_settings,
         )
 
-    # ------------------------------------------------------------------
-    # Handle RERUN (formerly change_strategy)
-    # ------------------------------------------------------------------
+    # ----------------------------------------------------------------------
+    # Merge global + per-run log settings
+    # ----------------------------------------------------------------------
+    def _merged_log_settings(self, run_item: RunItem) -> Dict[str, Any]:
+        """
+        Merge top-level log_io settings with per-run overrides.
+        """
+        global_cfg = self.config.log_io_settings
+        merged = {
+            "enabled": global_cfg.enabled,
+            "log_dir": global_cfg.log_dir,
+            "request_file_pattern": global_cfg.request_file_pattern,
+            "response_file_pattern": global_cfg.response_file_pattern,
+        }
+
+        if run_item.log_io_override:
+            override = run_item.log_io_override
+            if "enabled" in override:
+                merged["enabled"] = bool(override["enabled"])
+            if "log_dir" in override:
+                merged["log_dir"] = override["log_dir"]
+            if "request_file_pattern" in override:
+                merged["request_file_pattern"] = override["request_file_pattern"]
+            if "response_file_pattern" in override:
+                merged["response_file_pattern"] = override["response_file_pattern"]
+
+        return merged
+
+    # ----------------------------------------------------------------------
+    # Rerun handling
+    # ----------------------------------------------------------------------
     def _handle_change_strategy(self, validator_run_item: RunItem) -> bool:
         """
-        Handle a rerun request coming from a validator run.
-
-        Uses:
-        - validator_run_item.rerun_index
-        - validator_run_item.rerun_strategy
-        - validator_run_item.target_run
+        Apply rerun strategy:
+        - Modify target run's profile/provider/context
+        - Execute target run immediately
+        - Increment rerun attempt counter
+        - Return True if validator should re-run
         """
-        # Validator must specify target_run
-        if not validator_run_item.target_run:
-            self.logger.error("Rerun requested but validator_run_item.target_run is missing.")
+        name = validator_run_item.name
+
+        if validator_run_item.target_run is None:
+            self.logger.error(f"[RERUN] Validator '{name}' has no target_run set.")
             return False
 
-        # Find target run by name
-        target_run_name = validator_run_item.target_run
-        target_run: RunItem | None = None
-        for r in self.config.runs:
-            if r.name == target_run_name:
-                target_run = r
-                break
-
-        if target_run is None:
-            self.logger.error(f"Rerun requested but target run '{target_run_name}' not found.")
+        if validator_run_item.rerun_strategy is None:
+            self.logger.error(f"[RERUN] Validator '{name}' has no rerun_strategy file.")
             return False
 
-        # Load strategy file path
-        strategy_path = validator_run_item.rerun_strategy
-        if not strategy_path:
-            self.logger.error("Rerun requested but no rerun_strategy file specified.")
+        if validator_run_item.rerun_index is None:
+            self.logger.error(f"[RERUN] Validator '{name}' has no rerun_index.")
             return False
 
-        strategy_file = (self.project_root / strategy_path).resolve()
+        strategy_file = Path(validator_run_item.rerun_strategy)
         if not strategy_file.exists():
-            self.logger.error(f"Rerun strategy file missing: {strategy_file}")
-            return False
-
-        # Load the rerun strategy JSON
-        try:
-            rerun_strategy = RerunStrategy.from_file(strategy_file)
-        except Exception as e:
-            self.logger.error(f"Failed to load rerun strategy file '{strategy_file}': {e}")
-            return False
-
-        # Determine which block to use
-        block_index = validator_run_item.rerun_index
-        if block_index is None or block_index < 0:
-            self.logger.error("Invalid rerun_index on validator run item.")
-            return False
-
-        if block_index >= len(rerun_strategy.blocks):
             self.logger.error(
-                f"rerun_index {block_index} is out of range. "
-                f"Strategy has only {len(rerun_strategy.blocks)} blocks."
+                f"[RERUN] Strategy file does not exist: {strategy_file}"
             )
             return False
 
-        block = rerun_strategy.blocks[block_index]
+        # Load strategy
+        strategy = RerunStrategy.from_file(strategy_file)
+        blocks = strategy.blocks
 
-        # Determine current attempt index from in-memory map
-        key = (validator_run_item.name, block_index)
+        idx = validator_run_item.rerun_index
+        if idx < 0 or idx >= len(blocks):
+            self.logger.error(
+                f"[RERUN] Invalid rerun_index={idx} in validator '{name}'."
+            )
+            return False
+
+        block = blocks[idx]
+
+        key = (validator_run_item.name, idx)
         current_attempt = self._rerun_attempts.get(key, 0)
 
         if current_attempt >= len(block.attempts):
             self.logger.info(
-                f"All rerun attempts exhausted for validator='{validator_run_item.name}', "
-                f"block_index={block_index}."
+                f"[RERUN] All rerun attempts exhausted for validator '{name}'."
             )
             return False
 
-        attempt = block.attempts[current_attempt]
-        total_attempts = len(block.attempts)
+        attempt_cfg = block.attempts[current_attempt]
+
+        # Find target run
+        target_name = validator_run_item.target_run
+        target_run = None
+        for r in self.config.runs:
+            if r.name == target_name:
+                target_run = r
+                break
+
+        if not target_run:
+            self.logger.error(
+                f"[RERUN] Target run '{target_name}' not found in config."
+            )
+            return False
+
+        # Apply overrides
+        if attempt_cfg.profile_file:
+            target_run.profile_file = attempt_cfg.profile_file
+        if attempt_cfg.provider:
+            target_run.provider_override = attempt_cfg.provider
+        if attempt_cfg.context_files is not None:
+            target_run.context_file = attempt_cfg.context_files
 
         self.logger.info(
-            f"Applying rerun attempt {current_attempt + 1}/{total_attempts} "
-            f"from block {block_index} "
-            f"for target run '{target_run.name}'."
+            f"[RERUN] Applying rerun attempt {current_attempt + 1}/{len(block.attempts)} "
+            f"for target '{target_run.name}'."
         )
 
-        # Apply overrides to the target run
-        if attempt.profile_file:
-            target_run.profile_file = attempt.profile_file
-            self.logger.info(f"Override: profile_file -> {attempt.profile_file}")
-
-        if attempt.provider:
-            setattr(target_run, "provider_override", attempt.provider)
-            self.logger.info(f"Override: provider -> {attempt.provider}")
-
-        if attempt.context_files is not None:
-            target_run.context_file = attempt.context_files
-            self.logger.info(f"Override: context_file -> {attempt.context_files}")
-
-        # Advance attempt counter for this (validator, block) for next time
+        # Update attempt counter
         self._rerun_attempts[key] = current_attempt + 1
 
-        # 🔁 Actually execute the target run NOW
+        # Execute target run immediately with a new attempt number
+        attempt_number = self._increment_attempt(target_run)
+
         self.logger.info(
-            f"[RERUN] Executing target run '{target_run.name}' after applying overrides."
+            f"[RERUN] Executing target run '{target_run.name}' with attempt={attempt_number}"
         )
-        target_result = self._execute_run_item(target_run)
 
-        # For now we just log break/success; the main loop still controls pipeline flow.
-        if target_result.should_break:
-            self.logger.info(
-                f"[RERUN] Target run '{target_run.name}' requested break during rerun "
-                f"(this will be handled on its own turn in the pipeline, if needed)."
-            )
+        result = self._execute_run_item(target_run, attempt_number)
 
+        # Validator will run again
         return True
-

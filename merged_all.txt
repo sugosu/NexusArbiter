@@ -157,6 +157,17 @@ print(f'The {n}th Fibonacci number is: {fib_number}')
 
 
 ##########################################################################################
+# FILE: app\hello.py
+##########################################################################################
+
+def main():
+    print("Hello, world!")
+
+if __name__ == "__main__":
+    main()
+
+
+##########################################################################################
 # FILE: context_files\actions\actions_spec.json
 ##########################################################################################
 
@@ -517,33 +528,6 @@ print(f'The {n}th Fibonacci number is: {fib_number}')
 
 
 ##########################################################################################
-# FILE: context_files\profiles\gemini_codegen.json
-##########################################################################################
-
-{
-  "name": "gemini_codegen",
-  "model": "gemini-2.0-flash",
-  "provider": "gemini",
-  "temperature": 0.1,
-  "top_p": 0.95,
-  "max_tokens": 2000,
-  "messages": [
-    {
-      "role": "system",
-      "content": "You are an AI code generation agent.\n\nRULES:\n1. You must output ONLY a valid JSON object.\n2. The JSON must follow this structure:\n{\n  \"agent\": {\n    \"actions\": [\n      {\n        \"type\": \"file_write\",\n        \"params\": {\n          \"target_path\": \"IGNORED\",\n          \"code\": \"<FULL_PYTHON_CODE>\"\n        }\n      }\n    ]\n  }\n}\n3. Do not include markdown formatting (like ```json ... ```) outside the JSON structure."
-    },
-    {
-      "role": "user",
-      "content": "TASK: ${task_description}\n\nCONTEXT:\n${context_block}"
-    }
-  ],
-  "response_format": {
-    "type": "json_object"
-  }
-}
-
-
-##########################################################################################
 # FILE: context_files\profiles\project_manifest_generator.json
 ##########################################################################################
 
@@ -686,6 +670,32 @@ print(f'The {n}th Fibonacci number is: {fib_number}')
 
 
 ##########################################################################################
+# FILE: context_files\profiles\validator_hello.json
+##########################################################################################
+
+{
+  "name": "validator_hello",
+  "model": "gpt-4o-mini",
+  "provider": "openai",
+  "temperature": 0.0,
+  "top_p": 1,
+  "max_tokens": 800,
+  "response_format": { "type": "json_object" },
+  "messages": [
+    {
+      "role": "system",
+      "content": "You are a validator test agent.\n\nGOAL:\nWe are testing the rerun mechanism of the aiAgency pipeline.\n\nYou MUST ALWAYS respond with the following JSON structure:\n{\n  \"agent\": {\n    \"actions\": [\n      {\n        \"type\": \"rerun\",\n        \"params\": {\"reason\": \"Test rerun requested by validator_hello.\"}\n      }\n    ]\n  }\n}\n\nYou are NOT allowed to use any other action type (no continue, no break). Just always emit a single rerun action exactly in that format.\n\nDo NOT include markdown or backticks in the response. Only return the JSON object."
+    },
+    {
+      "role": "user",
+      "content": "Here is the current file content (you may ignore it for this test):\n\n{{FILE:app/hello.py}}"
+    }
+  ]
+}
+
+
+
+##########################################################################################
 # FILE: context_files\profiles\validator_test.json
 ##########################################################################################
 
@@ -720,6 +730,33 @@ print(f'The {n}th Fibonacci number is: {fib_number}')
   "user": "${default_user}"
 }
 
+
+
+##########################################################################################
+# FILE: context_files\profiles\gemini\gemini_codegen.json
+##########################################################################################
+
+{
+  "name": "gemini_codegen",
+  "model": "gemini-2.0-flash",
+  "provider": "gemini",
+  "temperature": 0.1,
+  "top_p": 0.95,
+  "max_tokens": 2000,
+  "messages": [
+    {
+      "role": "system",
+      "content": "You are an AI code generation agent.\n\nRULES:\n1. You must output ONLY a valid JSON object.\n2. The JSON must follow this structure:\n{\n  \"agent\": {\n    \"actions\": [\n      {\n        \"type\": \"file_write\",\n        \"params\": {\n          \"target_path\": \"IGNORED\",\n          \"code\": \"<FULL_PYTHON_CODE>\"\n        }\n      }\n    ]\n  }\n}\n3. Do not include markdown formatting (like ```json ... ```) outside the JSON structure."
+    },
+    {
+      "role": "user",
+      "content": "TASK: ${task_description}\n\nCONTEXT:\n${context_block}"
+    }
+  ],
+  "response_format": {
+    "type": "json_object"
+  }
+}
 
 
 ##########################################################################################
@@ -873,6 +910,46 @@ print(f'The {n}th Fibonacci number is: {fib_number}')
     }
   ]
 }
+
+
+##########################################################################################
+# FILE: context_files\runs\hello_rerun.json
+##########################################################################################
+
+{
+  "retry_policy": {
+    "system": {
+      "max_attempts": 3,
+      "retry_on_status": [429, 500, 502, 503, 504],
+      "retry_on_network_errors": true,
+      "backoff_seconds": [2, 4, 8]
+    }
+  },
+  "runs": [
+    {
+      "name": "codegen_hello",
+      "profile_file": "context_files/profiles/gemini/gemini_codegen.json",
+      "task_description": "Generate a simple hello-world module.",
+      "context_file": [],
+      "target_file": "app/hello.py",
+      "allowed_actions": ["file_write"]
+    },
+    {
+      "name": "validator_hello",
+      "profile_file": "context_files/profiles/validator_hello.json",
+      "task_description": "Validate hello.py and, if invalid, request a rerun.",
+      "context_file": ["app/hello.py"],
+      "target_file": null,
+
+      "rerun_index": 0,
+      "target_run": "codegen_hello",
+      "rerun_strategy": "context_files/strategies/hello_rerun_strategy.json",
+
+      "allowed_actions": ["rerun", "continue", "break"]
+    }
+  ]
+}
+
 
 
 ##########################################################################################
@@ -1039,6 +1116,31 @@ print(f'The {n}th Fibonacci number is: {fib_number}')
         "change_strategy",
         "continue",
         "break"
+      ]
+    }
+  ]
+}
+
+
+
+##########################################################################################
+# FILE: context_files\strategies\hello_rerun_strategy.json
+##########################################################################################
+
+{
+  "blocks": [
+    {
+      "attempts": [
+        {
+          "profile_file": "context_files/profiles/gemini/gemini_codegen.json",
+          "provider": "gemini",
+          "context_files": []
+        },
+        {
+          "profile_file": "context_files/profiles/gemini/gemini_codegen.json",
+          "provider": "gemini",
+          "context_files": []
+        }
       ]
     }
   ]
@@ -1601,10 +1703,9 @@ ActionRegistry.register(RequestRetryAction)
 # FILE: core\actions\rerun_action.py
 ##########################################################################################
 
-# core/actions/rerun_action.py
 from __future__ import annotations
 
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 
 from core.actions.base_action import BaseAction, ActionContext
 
@@ -1619,17 +1720,19 @@ class RerunAction(BaseAction):
     so the rest of the pipeline code does not need to change yet.
     """
 
-    # This is what the registry looks for
+    # This is what ActionRegistry looks for
     action_type = "rerun"
 
-    def execute(self, ctx: ActionContext, params: Dict[str, Any]) -> None:
+    def execute(self, ctx: ActionContext, params: Optional[Dict[str, Any]] = None) -> None:
+        # Allow params to be None
+        params = params or {}
         reason = params.get("reason", "No reason provided")
 
-        # Re-use the existing strategy-change flags so pipeline code stays the same
+        # Re-use existing strategy-change flags so pipeline logic stays the same
         ctx.change_strategy_requested = True
         ctx.change_strategy_reason = reason
 
-        # This action does not in itself break or continue; it just signals a rerun
+        # Rerun ends this run; pipeline decides what to do next
         ctx.should_continue = False
         ctx.should_break = False
 
@@ -1865,6 +1968,7 @@ from typing import Dict, Any, Optional, List
 from google import genai
 from google.genai import types
 from core.logger import BasicLogger
+import logging
 
 
 class GeminiClient:
@@ -1879,6 +1983,10 @@ class GeminiClient:
 
         self.logger = BasicLogger(self.__class__.__name__).get_logger()
         self.model = model
+        self.logger = BasicLogger(
+            self.__class__.__name__,
+            log_file="openai_client.jsonl",
+        ).get_logger()
 
         # Initialize the official client
         self.client = genai.Client(api_key=self.api_key)
@@ -1908,6 +2016,18 @@ class GeminiClient:
         if response_schema:
             config_args["response_mime_type"] = "application/json"
             config_args["response_schema"] = response_schema
+
+        # DEBUG: Log full outgoing payload (disabled unless DEBUG level is enabled)
+        if self.logger.isEnabledFor(logging.DEBUG):
+            safe_payload = {
+                "model": self.model,
+                "temperature": temperature,
+                "system_instruction": system_instruction,
+                "prompt": prompt,
+                "response_schema": response_schema,
+            }
+            self.logger.debug("FULL REQUEST PAYLOAD (Gemini):\n%s", json.dumps(safe_payload, indent=2))
+
 
         try:
             response = self.client.models.generate_content(
@@ -3143,164 +3263,96 @@ class AppRunner:
 # core/runtime/pipeline_runner.py
 from __future__ import annotations
 
-from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, Tuple
 
 from core.logger import BasicLogger
 from core.runtime.run_executor import RunExecutor, RunResult
 from core.config.run_config import RunConfig, RunItem
-from core.config.strategy_config import StrategyFile
+from core.strategy.rerun_strategy import RerunStrategy
 
 
 class PipelineRunner:
     """
     Orchestrates execution of the entire runs.json pipeline.
 
-    Key responsibilities:
-      - execute runs in sequence
-      - detect change_strategy requests from validator runs
-      - maintain attempt counters per (target_run, strategy_index)
-      - load strategy file and apply overrides
-      - re-run the target codegen run with the correct attempt settings
-      - detect break / success / exhaustion
+    Responsibilities:
+    - Execute runs in sequence
+    - Detect rerun (formerly change_strategy) requests from validator runs
+    - Maintain in-memory attempt counters per (validator_run_name, rerun_index)
+    - Load rerun strategy files and apply overrides
+    - Re-run the target codegen run with the correct attempt settings
+    - Respect break signals from actions
     """
 
-    def __init__(self, project_root: str, config: RunConfig):
+    def __init__(self, project_root: str | Path, config: RunConfig):
         self.project_root = Path(project_root)
         self.config = config
-        self.logger = BasicLogger("PipelineRunner").get_logger()
+        self.logger = BasicLogger(self.__class__.__name__).get_logger()
 
+        # Single-step executor
         self.executor = RunExecutor(project_root=str(self.project_root))
 
-        # Track number of attempts for each (target_run, strategy_index)
-        # Key: (str, int) -> (target_run_name, strategy_block_index)
-        # Value: int  -> number of change_strategy attempts already used
-        self.strategy_attempt_counters: Dict[Tuple[str, int], int] = {}
-
-        # Correlate one full pipeline execution in the logs
-        self.run_id = datetime.utcnow().strftime("%Y%m%d-%H%M%S-%f")
+        # (validator_run_name, rerun_index) -> attempt_index
+        self._rerun_attempts: Dict[Tuple[str, int], int] = {}
 
     # ------------------------------------------------------------------
-    # Main pipeline execution entrypoint
+    # Public API
     # ------------------------------------------------------------------
     def run(self) -> None:
+        """
+        Execute the pipeline according to the loaded RunConfig.
+        """
+        self.logger.info("Warp field stabilized")
+        self.logger.info("Pipeline started")
+
+        i = 0
         total_runs = len(self.config.runs)
-        succeeded = 0
 
-        self.logger.info(
-    "Warp field stabilized",
-    extra={"event": "warp_stabilized"}
-)
-
-        self.logger.info(
-            "Pipeline started",
-            extra={
-                "event": "pipeline_start",
-                "run_id": self.run_id,
-                "project_root": str(self.project_root),
-                "total_runs": total_runs,
-            },
-        )
-
-        
-
-        for index, run_item in enumerate(self.config.runs):
-            self.logger.info(
-                f"[RUN] Starting '{run_item.name}'",
-                extra={
-                    "event": "run_start",
-                    "run_id": self.run_id,
-                    "run_index": index,
-                    "total_runs": total_runs,
-                    "run_name": run_item.name,
-                    "profile_file": run_item.profile_file,
-                    "target_file": run_item.target_file,
-                    "context_files": list(run_item.context_file),
-                    "is_validator": run_item.is_validator(),
-                },
-            )
+        while i < total_runs:
+            run_item = self.config.runs[i]
+            self.logger.info(f"[RUN] Starting '{run_item.name}'")
 
             result = self._execute_run_item(run_item)
 
-            # Break requested by an action
+            # Break requested: stop whole pipeline
             if result.should_break:
+                self.logger.info(f"[RUN] '{run_item.name}' requested break -> stopping pipeline.")
+                break
+
+            # Rerun requested: apply rerun strategy and stay on same index
+            if result.change_strategy_requested:
                 self.logger.info(
-                    f"[RUN] '{run_item.name}' requested break. Pipeline stopping.",
-                    extra={
-                        "event": "run_break",
-                        "run_id": self.run_id,
-                        "run_name": run_item.name,
-                    },
+                    f"[RUN] '{run_item.name}' requested rerun: {result.change_strategy_reason}"
                 )
-                break
+                rerun_applied = self._handle_change_strategy(run_item)
+                if rerun_applied:
+                    # Stay on same run index to re-execute after overrides
+                    continue
+                else:
+                    self.logger.warning(
+                        f"[RUN] Rerun requested by '{run_item.name}' but no further attempts remain."
+                    )
 
-            if not result.success:
-                self.logger.error(
-                    f"[RUN] '{run_item.name}' failed. Pipeline stopping.",
-                    extra={
-                        "event": "run_failed",
-                        "run_id": self.run_id,
-                        "run_name": run_item.name,
-                        "change_strategy_requested": result.change_strategy_requested,
-                        "change_strategy_reason": result.change_strategy_reason,
-                    },
-                )
-                break
+            # Otherwise, proceed to next run
+            self.logger.info(f"[RUN] '{run_item.name}' succeeded.")
+            i += 1
 
-            self.logger.info(
-                f"[RUN] '{run_item.name}' succeeded.",
-                extra={
-                    "event": "run_succeeded",
-                    "run_id": self.run_id,
-                    "run_name": run_item.name,
-                },
-            )
-            succeeded += 1
-
-        self.logger.info(
-            "Pipeline finished",
-            extra={
-                "event": "pipeline_finished",
-                "run_id": self.run_id,
-                "succeeded_runs": succeeded,
-                "total_runs": total_runs,
-            },
-        )
+        self.logger.info("Pipeline finished")
 
     # ------------------------------------------------------------------
-    # Execute a single run item (possibly triggers strategy reruns)
+    # Single run execution
     # ------------------------------------------------------------------
     def _execute_run_item(self, run_item: RunItem) -> RunResult:
-        # Normal single execution for codegen or validator
-        base_result = self._execute_once(run_item)
-
-        if base_result.change_strategy_requested:
-            # Must be a validator run (by design)
-            self.logger.info(
-                f"[RUN] '{run_item.name}' requested change_strategy.",
-                extra={
-                    "event": "run_change_strategy_requested",
-                    "run_id": self.run_id,
-                    "run_name": run_item.name,
-                    "change_strategy_reason": base_result.change_strategy_reason,
-                },
-            )
-            return self._handle_change_strategy(run_item, base_result)
-
-        return base_result
-
-    # ------------------------------------------------------------------
-    # Actual single execution call to RunExecutor
-    # ------------------------------------------------------------------
-    def _execute_once(self, run_item: RunItem) -> RunResult:
+        """
+        Execute a single run item using RunExecutor.
+        """
         profile_file = run_item.profile_file
         context_files = run_item.context_file
         target_file = run_item.target_file
 
-        # Provider now comes from profile (or strategy overrides),
-        # so for a normal run we pass no override.
-        provider_override: Optional[str] = None
+        # Provider override can be injected by rerun strategy
+        provider_override = getattr(run_item, "provider_override", None)
 
         return self.executor.execute_once(
             run_item=run_item,
@@ -3311,12 +3363,118 @@ class PipelineRunner:
         )
 
     # ------------------------------------------------------------------
-    # NOTE:
-    # _handle_change_strategy(...) and _find_run_item(...) remain as you
-    # currently have them. You already have detailed logs inside that
-    # method; they will continue to show up with run_id included in
-    # the higher-level entries above.
+    # Handle RERUN (formerly change_strategy)
     # ------------------------------------------------------------------
+    def _handle_change_strategy(self, validator_run_item: RunItem) -> bool:
+        """
+        Handle a rerun request coming from a validator run.
+
+        Uses:
+        - validator_run_item.rerun_index
+        - validator_run_item.rerun_strategy
+        - validator_run_item.target_run
+        """
+        # Validator must specify target_run
+        if not validator_run_item.target_run:
+            self.logger.error("Rerun requested but validator_run_item.target_run is missing.")
+            return False
+
+        # Find target run by name
+        target_run_name = validator_run_item.target_run
+        target_run: RunItem | None = None
+        for r in self.config.runs:
+            if r.name == target_run_name:
+                target_run = r
+                break
+
+        if target_run is None:
+            self.logger.error(f"Rerun requested but target run '{target_run_name}' not found.")
+            return False
+
+        # Load strategy file path
+        strategy_path = validator_run_item.rerun_strategy
+        if not strategy_path:
+            self.logger.error("Rerun requested but no rerun_strategy file specified.")
+            return False
+
+        strategy_file = (self.project_root / strategy_path).resolve()
+        if not strategy_file.exists():
+            self.logger.error(f"Rerun strategy file missing: {strategy_file}")
+            return False
+
+        # Load the rerun strategy JSON
+        try:
+            rerun_strategy = RerunStrategy.from_file(strategy_file)
+        except Exception as e:
+            self.logger.error(f"Failed to load rerun strategy file '{strategy_file}': {e}")
+            return False
+
+        # Determine which block to use
+        block_index = validator_run_item.rerun_index
+        if block_index is None or block_index < 0:
+            self.logger.error("Invalid rerun_index on validator run item.")
+            return False
+
+        if block_index >= len(rerun_strategy.blocks):
+            self.logger.error(
+                f"rerun_index {block_index} is out of range. "
+                f"Strategy has only {len(rerun_strategy.blocks)} blocks."
+            )
+            return False
+
+        block = rerun_strategy.blocks[block_index]
+
+        # Determine current attempt index from in-memory map
+        key = (validator_run_item.name, block_index)
+        current_attempt = self._rerun_attempts.get(key, 0)
+
+        if current_attempt >= len(block.attempts):
+            self.logger.info(
+                f"All rerun attempts exhausted for validator='{validator_run_item.name}', "
+                f"block_index={block_index}."
+            )
+            return False
+
+        attempt = block.attempts[current_attempt]
+        total_attempts = len(block.attempts)
+
+        self.logger.info(
+            f"Applying rerun attempt {current_attempt + 1}/{total_attempts} "
+            f"from block {block_index} "
+            f"for target run '{target_run.name}'."
+        )
+
+        # Apply overrides to the target run
+        if attempt.profile_file:
+            target_run.profile_file = attempt.profile_file
+            self.logger.info(f"Override: profile_file -> {attempt.profile_file}")
+
+        if attempt.provider:
+            setattr(target_run, "provider_override", attempt.provider)
+            self.logger.info(f"Override: provider -> {attempt.provider}")
+
+        if attempt.context_files is not None:
+            target_run.context_file = attempt.context_files
+            self.logger.info(f"Override: context_file -> {attempt.context_files}")
+
+        # Advance attempt counter for this (validator, block) for next time
+        self._rerun_attempts[key] = current_attempt + 1
+
+        # 🔁 Actually execute the target run NOW
+        self.logger.info(
+            f"[RERUN] Executing target run '{target_run.name}' after applying overrides."
+        )
+        target_result = self._execute_run_item(target_run)
+
+        # For now we just log break/success; the main loop still controls pipeline flow.
+        if target_result.should_break:
+            self.logger.info(
+                f"[RERUN] Target run '{target_run.name}' requested break during rerun "
+                f"(this will be handled on its own turn in the pipeline, if needed)."
+            )
+
+        return True
+
 
 
 
@@ -3424,6 +3582,286 @@ class RunExecutor:
 
 ##########################################################################################
 # FILE: core\runtime\__init__.py
+##########################################################################################
+
+
+
+
+##########################################################################################
+# FILE: core\strategy\rerun_strategy.py
+##########################################################################################
+
+# core/strategy/rerun_strategy.py
+from __future__ import annotations
+
+import json
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import List, Optional
+
+
+# ----------------------------------------------------------------------
+# Single rerun attempt (profile override, provider override, context)
+# ----------------------------------------------------------------------
+@dataclass
+class RerunAttempt:
+    profile_file: Optional[str] = None
+    provider: Optional[str] = None
+    context_files: Optional[List[str]] = None
+
+
+# ----------------------------------------------------------------------
+# A block of attempts (example: 3 possible retries)
+# ----------------------------------------------------------------------
+@dataclass
+class RerunBlock:
+    attempts: List[RerunAttempt] = field(default_factory=list)
+    current_attempt: int = 0  # increments each time a validator requests rerun
+
+    @staticmethod
+    def from_dict(data: dict) -> "RerunBlock":
+        attempts = [
+            RerunAttempt(
+                profile_file=a.get("profile_file"),
+                provider=a.get("provider"),
+                context_files=a.get("context_files"),
+            )
+            for a in data.get("attempts", [])
+        ]
+        return RerunBlock(attempts=attempts)
+
+
+# ----------------------------------------------------------------------
+# Whole strategy file (.json)
+# Supports multiple blocks; validator selects rerun_index = which block.
+# ----------------------------------------------------------------------
+@dataclass
+class RerunStrategy:
+    blocks: List[RerunBlock]
+
+    @staticmethod
+    def from_file(path: Path | str) -> "RerunStrategy":
+        if isinstance(path, str):
+            path = Path(path)
+
+        with path.open("r", encoding="utf-8") as f:
+            raw = json.load(f)
+
+        # Accept both new field "blocks" and backward-compatible "strategy"
+        data_blocks = raw.get("blocks")
+        if data_blocks is None:
+            data_blocks = raw.get("strategy")  # backward compatibility
+
+        if not isinstance(data_blocks, list):
+            raise ValueError("rerun_strategy.json must contain a 'blocks' list.")
+
+        blocks = [RerunBlock.from_dict(b) for b in data_blocks]
+        return RerunStrategy(blocks=blocks)
+
+
+
+##########################################################################################
+# FILE: tests\conftest.py
+##########################################################################################
+
+# tests/conftest.py
+from __future__ import annotations
+
+from pathlib import Path
+from typing import Any, Optional
+
+import logging
+import pytest
+
+from core.actions.base_action import ActionContext
+from core.logger import BasicLogger
+
+
+@pytest.fixture
+def tmp_project_root(tmp_path: Path) -> Path:
+    """
+    Temporary project root used for tests.
+    You can point it to your real project later if needed.
+    """
+    return tmp_path
+
+
+@pytest.fixture
+def test_logger() -> logging.Logger:
+    """
+    Basic logger for tests – uses the same BasicLogger,
+    but you could also plug a NullHandler if you want silence.
+    """
+    return BasicLogger("test-logger", log_to_file=False).get_logger()
+
+
+def make_action_context(
+    project_root: Path,
+    logger: logging.Logger,
+    target_file: Optional[str] = None,
+    run_name: str = "test_run",
+    run_item: Any = None,
+) -> ActionContext:
+    """
+    Helper to construct a minimal ActionContext for action tests.
+    """
+    return ActionContext(
+        project_root=str(project_root),
+        target_file=target_file,
+        run_name=run_name,
+        run_item=run_item,
+        logger=logger,
+    )
+
+
+
+##########################################################################################
+# FILE: tests\test_break_and_continue_actions.py
+##########################################################################################
+
+# tests/test_break_and_continue_actions.py
+from __future__ import annotations
+
+from typing import Dict
+
+from core.actions.base_action import ActionContext
+from core.actions.break_action import BreakAction
+from core.actions.continue_action import ContinueAction
+from tests.conftest import make_action_context
+
+
+def _make_ctx(tmp_project_root, test_logger) -> ActionContext:
+    return make_action_context(
+        project_root=tmp_project_root,
+        logger=test_logger,
+        target_file=None,
+        run_name="simple_run",
+        run_item=None,
+    )
+
+
+def test_break_action_sets_break_flag(tmp_project_root, test_logger):
+    ctx = _make_ctx(tmp_project_root, test_logger)
+
+    params: Dict[str, str] = {"reason": "User requested stop"}
+    action = BreakAction()
+    action.execute(ctx, params)
+
+    assert ctx.should_break is True
+    assert ctx.should_continue is False
+
+
+def test_continue_action_sets_continue_flag(tmp_project_root, test_logger):
+    ctx = _make_ctx(tmp_project_root, test_logger)
+
+    params: Dict[str, str] = {"reason": "Validation ok"}
+    action = ContinueAction()
+    action.execute(ctx, params)
+
+    assert ctx.should_continue is True
+    # continue should not trigger a break
+    assert ctx.should_break is False
+
+
+
+##########################################################################################
+# FILE: tests\test_file_write_action.py
+##########################################################################################
+
+from __future__ import annotations
+
+from pathlib import Path
+from typing import Dict
+
+from core.actions.base_action import ActionContext
+from core.actions.file_write_action import FileWriteAction
+from tests.conftest import make_action_context
+
+
+def _make_ctx(tmp_project_root, test_logger, target_file: str) -> ActionContext:
+    return make_action_context(
+        project_root=tmp_project_root,
+        logger=test_logger,
+        target_file=target_file,
+        run_name="file_write_run",
+        run_item=None,
+    )
+
+
+def test_file_write_action_writes_to_target(tmp_project_root, test_logger):
+    target_rel = "out/test_file.txt"
+    target_path = tmp_project_root / target_rel
+
+    ctx = _make_ctx(tmp_project_root, test_logger, target_rel)
+
+    params: Dict[str, str] = {
+        "target_path": target_rel,  # or let your action default to ctx.target_file
+        "code": "Hello from test",
+    }
+
+    action = FileWriteAction()
+    action.execute(ctx, params)
+
+    assert target_path.exists()
+    assert target_path.read_text(encoding="utf-8") == "Hello from test"
+
+
+
+##########################################################################################
+# FILE: tests\test_rerun_action.py
+##########################################################################################
+
+# tests/test_rerun_action.py
+from __future__ import annotations
+
+from typing import Dict
+
+from core.actions.base_action import ActionContext
+from core.actions.rerun_action import RerunAction
+from tests.conftest import make_action_context
+
+
+def _make_ctx(tmp_project_root, test_logger) -> ActionContext:
+    return make_action_context(
+        project_root=tmp_project_root,
+        logger=test_logger,
+        target_file=None,
+        run_name="validator_test",
+        run_item=None,
+    )
+
+
+def test_rerun_action_sets_flags_with_reason(tmp_project_root, test_logger):
+    ctx = _make_ctx(tmp_project_root, test_logger)
+    params: Dict[str, str] = {"reason": "Validator rejected code"}
+
+    action = RerunAction()
+    action.execute(ctx, params)
+
+    assert ctx.change_strategy_requested is True
+    assert ctx.change_strategy_reason == "Validator rejected code"
+    # It should end the current run, but not break the whole pipeline
+    assert ctx.should_continue is False
+    assert ctx.should_break is False
+
+
+def test_rerun_action_default_reason(tmp_project_root, test_logger):
+    ctx = _make_ctx(tmp_project_root, test_logger)
+
+    action = RerunAction()
+    # No params provided
+    action.execute(ctx, None)
+
+    assert ctx.change_strategy_requested is True
+    assert ctx.change_strategy_reason is not None
+    assert "No reason" in ctx.change_strategy_reason
+    assert ctx.should_continue is False
+    assert ctx.should_break is False
+
+
+
+##########################################################################################
+# FILE: tests\__init__.py
 ##########################################################################################
 
 

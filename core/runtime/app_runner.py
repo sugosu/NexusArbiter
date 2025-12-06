@@ -9,358 +9,342 @@ from core.logger import BasicLogger
 from core.actions.registry import ActionRegistry
 from core.actions.base_action import ActionContext, BaseAction
 from core.ai_client.openai_client import OpenAIClient
-from core.ai_client.ai_response_parser import AIResponseParser
 from core.ai_client.gemini_client import GeminiClient
+
+
+class RunResult:
+    """
+    Returned by AppRunner after a single model call + action execution.
+    """
+
+    def __init__(
+        self,
+        success: bool,
+        should_continue: bool = False,
+        should_break: bool = False,
+        change_strategy_requested: bool = False,
+        change_strategy_reason: Optional[str] = None,
+    ):
+        self.success = success
+        self.should_continue = should_continue
+        self.should_break = should_break
+        self.change_strategy_requested = change_strategy_requested
+        self.change_strategy_reason = change_strategy_reason
 
 
 class AppRunner:
     """
-    Responsible for:
-        - loading the profile JSON
-        - assembling model input payload
-        - calling the correct provider (OpenAI, Gemini, ...)
-        - parsing model output into actions
-        - filtering allowed actions
-        - executing actions in order
-        - returning an ActionContext summarizing what happened
+    Executes one RunItem through the AI provider + action pipeline.
 
-    No retry logic happens here.
+    Responsibilities:
+    - Build request payloads for the model.
+    - Invoke provider client.
+    - Log request + response files if enabled.
+    - Parse the response JSON.
+    - Execute actions in order.
+    - Return a RunResult with control-flow flags.
     """
 
-    def __init__(self, project_root: Path | str):
-        self.project_root = Path(project_root).resolve()
+    def __init__(self, project_root: Path):
+        self.project_root = Path(project_root)
         self.logger = BasicLogger("AppRunner").get_logger()
 
-        # Action registry must be available
+        # Register all built-in actions once
         ActionRegistry.register_defaults()
 
-    # ----------------------------------------------------------------------
-    # Public main entrypoint
-    # ----------------------------------------------------------------------
-    def run_single(
+    # ------------------------------------------------------------------
+    def run(
         self,
         run_item: Any,
-        profile_file: str,
+        run_params: Dict[str, Any],
+        profile_name: Optional[str],
+        class_name: Optional[str],
+        task_description: Optional[str],
+        agent_input_overrides: Dict[str, Any],
+    ) -> RunResult:
+        """
+        Execute a single RunItem via the configured AI provider + actions.
+        """
+
+        # Extract key runtime parameters ---------------------------------
+        profile_file = run_params["profile_file"]
+        context_files = run_params["context_files"]
+        target_file = run_params.get("target_file")
+        provider_override = run_params.get("provider_override")
+
+        attempt_number = run_params["attempt_number"]
+        log_io_settings = run_params["log_io_settings"]
+
+        # Load profile JSON ----------------------------------------------
+        with open(profile_file, "r", encoding="utf-8") as f:
+            profile = json.load(f)
+
+        provider = (
+            provider_override
+            if provider_override
+            else profile.get("provider", "openai")
+        )
+
+        # Construct request ----------------------------------------------
+        request_payload = self._build_request_payload(
+            profile=profile,
+            context_files=context_files,
+            run_item=run_item,
+            task_description=task_description,
+            agent_input_overrides=agent_input_overrides,
+        )
+
+        # Write request log file -----------------------------------------
+        if log_io_settings.get("enabled"):
+            self._write_io_file(
+                log_io_settings=log_io_settings,
+                run_name=run_item.name,
+                attempt=attempt_number,
+                is_request=True,
+                content=request_payload,
+            )
+
+        # Call provider ---------------------------------------------------
+        if provider == "openai":
+            client = OpenAIClient(self.logger)
+        elif provider == "gemini":
+            client = GeminiClient(self.logger)
+        else:
+            raise ValueError(f"Unsupported provider '{provider}'")
+
+        raw_response = client.send(request_payload)
+
+        # Write response log file ----------------------------------------
+        if log_io_settings.get("enabled"):
+            self._write_io_file(
+                log_io_settings=log_io_settings,
+                run_name=run_item.name,
+                attempt=attempt_number,
+                is_request=False,
+                content=raw_response,
+            )
+
+        # Parse provider output ------------------------------------------
+        try:
+            actions = self._extract_agent_actions(raw_response)
+        except Exception as e:
+            self.logger.error(f"Failed to parse model output: {e}")
+            return RunResult(success=False, should_break=True)
+
+        # Execute actions -------------------------------------------------
+        result = self._execute_actions(
+            actions=actions,
+            run_item=run_item,
+            target_file=target_file,
+            attempt_number=attempt_number,
+            log_io_settings=log_io_settings,
+        )
+
+        return result
+
+    # ----------------------------------------------------------------------
+    # Build the request JSON payload according to profile rules
+    # ----------------------------------------------------------------------
+    def _build_request_payload(
+        self,
+        profile: Dict[str, Any],
         context_files: List[str],
+        run_item: Any,
+        task_description: Optional[str],
+        agent_input_overrides: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """
+        Build the model payload using the profile template and context files.
+        """
+
+        agent_input: Dict[str, Any] = {
+            "task_description": task_description,
+            "allowed_actions": run_item.allowed_actions,
+        }
+        agent_input.update(agent_input_overrides)
+
+        # Load context files
+        context_blocks: List[str] = []
+        for file_path in context_files:
+            full_path = self.project_root / file_path
+            if full_path.exists():
+                with open(full_path, "r", encoding="utf-8") as f:
+                    context_blocks.append(
+                        f"=== CONTEXT FILE: {file_path} ===\n{f.read()}"
+                    )
+
+        context_block = "\n\n".join(context_blocks)
+
+        # Fill template messages
+        messages: List[Dict[str, str]] = []
+        for msg in profile.get("messages", []):
+            role = msg["role"]
+            content = msg["content"]
+
+            # Replace placeholders
+            content = content.replace("${agent_input}", json.dumps(agent_input))
+            content = content.replace("${rules_block}", "")
+            content = content.replace("${task_description}", task_description or "")
+            content = content.replace("${context_block}", context_block)
+
+            messages.append({"role": role, "content": content})
+
+        payload: Dict[str, Any] = {
+            "model": profile.get("model"),
+            "temperature": profile.get("temperature"),
+            "top_p": profile.get("top_p"),
+            "max_tokens": profile.get("max_tokens"),
+            "messages": messages,
+            "response_format": profile.get("response_format"),
+        }
+
+        return payload
+
+    # ----------------------------------------------------------------------
+    # Request/response logging
+    # ----------------------------------------------------------------------
+    def _write_io_file(
+        self,
+        log_io_settings: Dict[str, Any],
+        run_name: str,
+        attempt: int,
+        is_request: bool,
+        content: Any,
+    ) -> None:
+        """
+        Write a request or response JSON file under log_io.log_dir
+        according to the configured filename patterns.
+        """
+
+        log_dir = Path(log_io_settings["log_dir"])
+        pattern = (
+            log_io_settings["request_file_pattern"]
+            if is_request
+            else log_io_settings["response_file_pattern"]
+        )
+
+        filename = pattern.format(run_name=run_name, attempt=attempt)
+        log_dir.mkdir(parents=True, exist_ok=True)
+
+        path = log_dir / filename
+
+        try:
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump(content, f, indent=2, ensure_ascii=False)
+            self.logger.info(
+                f"[IO-LOG] {'Request' if is_request else 'Response'} saved to {path}"
+            )
+        except Exception as e:
+            self.logger.error(f"Failed to write log file '{path}': {e}")
+
+    # ----------------------------------------------------------------------
+    # Extract the `agent.actions` array from the provider output
+    # ----------------------------------------------------------------------
+    def _extract_agent_actions(self, raw_response: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """
+        Unwrap provider-specific envelopes and return agent.actions list.
+
+        Supported shapes:
+
+        1) OpenAI / Gemini-style chat completion:
+           {
+             "choices": [
+               {
+                 "message": {
+                   "content": <JSON object OR JSON string>
+                 }
+               }
+             ]
+           }
+
+        2) Direct JSON with 'agent':
+           {
+             "agent": { "actions": [...] }
+           }
+        """
+        content: Any = raw_response
+
+        # 1) If it's a chat-completions style envelope, unwrap choices[0].message.content
+        if isinstance(raw_response, dict) and "choices" in raw_response:
+            choices = raw_response.get("choices") or []
+            if not choices:
+                raise ValueError("Model response contains no choices")
+
+            first_choice = choices[0] or {}
+            message = first_choice.get("message") or {}
+            content = message.get("content")
+
+        # 2) If content is a JSON string, parse it
+        if isinstance(content, str):
+            try:
+                content = json.loads(content)
+            except json.JSONDecodeError as e:
+                raise ValueError(
+                    f"Model response message content is not valid JSON: {e}"
+                ) from e
+
+        # 3) If content is still not a dict, this is an error
+        if not isinstance(content, dict):
+            raise ValueError("Model response message content is not a JSON object")
+
+        # 4) Now expect the aiAgency contract: content["agent"]["actions"]
+        agent = content.get("agent")
+        if not isinstance(agent, dict):
+            raise ValueError("Model response missing 'agent' object")
+
+        actions = agent.get("actions")
+        if not isinstance(actions, list):
+            raise ValueError("Model response 'agent.actions' must be a list")
+
+        return actions
+
+    # ----------------------------------------------------------------------
+    # Action execution pipeline
+    # ----------------------------------------------------------------------
+    def _execute_actions(
+        self,
+        actions: List[Dict[str, Any]],
+        run_item: Any,
         target_file: Optional[str],
-        provider_override: Optional[str] = None,
-    ) -> ActionContext:
+        attempt_number: int,
+        log_io_settings: Dict[str, Any],
+    ) -> RunResult:
         """
-        Execute a single run step. This is called by RunExecutor.
-
-        Provider resolution order:
-            1) provider_override   (strategy attempt)
-            2) profile["provider"] (profile JSON)
-            3) "openai" (default)
+        Execute the list of actions returned by the model.
         """
 
-        # Load profile JSON
-        resolved_profile = self._load_profile(profile_file)
-
-        # Resolve provider
-        provider_name: Optional[str] = provider_override
-        if not provider_name:
-            provider_name = resolved_profile.get("provider")
-        if not provider_name:
-            provider_name = "openai"
-
-        self.logger.info(
-            f"Selected provider '{provider_name}' for profile '{profile_file}' "
-            f"(target_file='{target_file}')"
-        )
-
-        # Build model request
-        payload = self._build_model_payload(
-            resolved_profile,
-            run_item,
-            provider_name,
-            context_files,
-        )
-
-        # Call provider
-        agent_obj = self._invoke_model(provider_name, payload)
-
-        # Prepare action context
         ctx = ActionContext(
             project_root=str(self.project_root),
             target_file=target_file,
             run_name=run_item.name,
             run_item=run_item,
             logger=self.logger,
+            attempt_number=attempt_number,
+            log_io_settings=log_io_settings,
         )
 
-        # Parse + execute actions
-        actions = agent_obj.get("actions", [])
-        filtered = self._filter_actions(actions, run_item.allowed_actions)
-        self._execute_actions(filtered, ctx)
-
-        return ctx
-
-    # ----------------------------------------------------------------------
-    # Internal utilities
-    # ----------------------------------------------------------------------
-    def _load_profile(self, profile_file: str) -> Dict[str, Any]:
-        """
-        Load the profile JSON from disk.
-        """
-        profile_path = (self.project_root / profile_file).resolve()
-        with profile_path.open("r", encoding="utf-8") as f:
-            data = json.load(f)
-
-        if not isinstance(data, dict):
-            raise ValueError(f"Profile '{profile_file}' must contain a JSON object.")
-
-        return data
-
-    def _build_model_payload(
-        self,
-        profile_dict: Dict[str, Any],
-        run_item: Any,
-        provider_name: str,
-        context_files: List[str],
-    ) -> Dict[str, Any]:
-        """
-        Merge:
-            - static profile JSON
-            - run_item metadata
-            - context files
-        """
-
-        # Inject runtime metadata into the profile
-        profile_dict = dict(profile_dict)  # shallow copy
-
-        # Build agent_input
-        agent_input = {
-            "profile_name": run_item.profile_file,
-            "class_name": getattr(run_item, "class_name", None),
-            "allowed_actions": run_item.allowed_actions,
-            "provider": provider_name,
-        }
-
-        # Construct context block
-        context_blocks: List[str] = []
-        for cf in context_files:
-            path = self.project_root / cf
-            try:
-                with path.open("r", encoding="utf-8") as f:
-                    ctxdata = f.read()
-                context_blocks.append(
-                    f"=== CONTEXT FILE: {cf} ===\n{ctxdata}"
-                )
-            except Exception as e:
-                context_blocks.append(
-                    f"=== CONTEXT FILE: {cf} ===\n!! ERROR READING FILE: {e} !!"
-                )
-
-        # agent_input is placed inside the request
-        payload: Dict[str, Any] = {
-            "model": profile_dict.get("model"),
-            "temperature": profile_dict.get("temperature", 0),
-            "top_p": profile_dict.get("top_p", 1),
-            "max_tokens": profile_dict.get("max_tokens", 2000),
-            "messages": self._inject_messages(
-                profile_dict.get("messages", []),
-                agent_input,
-                context_blocks,
-                getattr(run_item, "task_description", None),
-            ),
-            "response_format": profile_dict.get(
-                "response_format", {"type": "json_object"}
-            ),
-            "user": profile_dict.get("user", "${default_user}"),
-        }
-
-        self.logger.info(
-            "Prepared model payload",
-            extra={
-                "event": "model_payload_built",
-                "run_name": getattr(run_item, "name", None),
-                "provider": provider_name,
-                "model": payload.get("model"),
-                "temperature": payload.get("temperature"),
-                "max_tokens": payload.get("max_tokens"),
-                "num_messages": len(payload.get("messages", [])),
-                "num_context_files": len(context_files),
-            },
-        )
-
-        self.logger.info("Starting model call via provider '%s'.", provider_name)
-        return payload
-
-    def _inject_messages(
-        self,
-        messages: List[Dict[str, Any]],
-        agent_input: Dict[str, Any],
-        context_blocks: List[str],
-        task_description: Optional[str],
-    ) -> List[Dict[str, Any]]:
-        """
-        Replace ${agent_input}, ${context_block}, ${task_description}
-        placeholders inside the profile messages.
-        """
-        ctx_combined = "\n\n".join(context_blocks)
-
-        result: List[Dict[str, Any]] = []
-        for msg in messages:
-            content = msg.get("content", "")
-
-            content = content.replace(
-                "${agent_input}", json.dumps(agent_input, indent=2)
-            )
-            content = content.replace("${context_block}", ctx_combined)
-
-            if task_description:
-                content = content.replace("${task_description}", task_description)
-
-            result.append({
-                "role": msg["role"],
-                "content": content,
-            })
-        return result
-
-    def _invoke_model(self, provider_name: str, payload: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Dispatch to the correct provider client and normalize response
-        into an 'agent' object understood by the action layer.
-        """
-        temperature = payload.get("temperature", 0.0)
-        model_name = payload.get("model")
-
-        if provider_name == "openai":
-            client = OpenAIClient()
-            response = client.call(payload)
-            return AIResponseParser.extract_agent(response)
-
-        elif provider_name == "gemini":
-            # If the JSON still says an OpenAI model, default to a Gemini model
-            if not model_name or "gpt" in model_name:
-                model_name = "gemini-2.0-flash"
-
-            client = GeminiClient(model=model_name)
-
-            # Extract messages to format prompt
-            messages = payload.get("messages", [])
-            system_instruction = None
-            user_parts: List[str] = []
-
-            for msg in messages:
-                role = msg.get("role")
-                content = msg.get("content", "")
-                if role == "system" and not system_instruction:
-                    system_instruction = content
-                else:
-                    # Keep it simple: ROLE: content
-                    user_parts.append(f"{role.upper()}: {content}")
-
-            final_prompt = "\n\n".join(user_parts)
-
-            # Map OpenAI-style response_format → Gemini structured output schema
-            response_schema: Optional[Dict[str, Any]] = None
-            response_format = payload.get("response_format")
-
-            if isinstance(response_format, dict) and response_format.get("type") == "json_object":
-                # Minimal schema for:
-                # {
-                #   "agent": {
-                #     "actions": [
-                #       {
-                #         "type": "file_write",
-                #         "params": { "target_path": "...", "code": "..." }
-                #       }
-                #     ]
-                #   }
-                # }
-                # IMPORTANT: no `additionalProperties` – Gemini API does not support it.
-                response_schema = {
-                    "type": "object",
-                    "properties": {
-                        "agent": {
-                            "type": "object",
-                            "properties": {
-                                "actions": {
-                                    "type": "array",
-                                    "items": {
-                                        "type": "object",
-                                        "properties": {
-                                            "type": {"type": "string"},
-                                            "params": {
-                                                "type": "object",
-                                                "properties": {
-                                                    "target_path": {"type": "string"},
-                                                    "code": {"type": "string"},
-                                                },
-                                                "required": ["code"],
-                                            },
-                                        },
-                                        "required": ["type", "params"],
-                                    },
-                                }
-                            },
-                            "required": ["actions"],
-                        }
-                    },
-                    "required": ["agent"],
-                }
-
-            response_dict = client.generate_content(
-                prompt=final_prompt,
-                system_instruction=system_instruction,
-                response_schema=response_schema,
-                temperature=temperature,
-            )
-
-            # Normalize to the shape AIResponseParser expects
-            return AIResponseParser.extract_agent(
-                {"choices": [{"message": {"content": response_dict}}]}
-            )
-
-        else:
-            raise NotImplementedError(f"Provider '{provider_name}' not implemented.")
-
-
-
-
-    def _filter_actions(
-        self,
-        actions: List[Dict[str, Any]],
-        allowed: List[str],
-    ) -> List[Dict[str, Any]]:
-        """
-        Keep only actions whose type is allowed by run_item.
-        """
-        kept: List[Dict[str, Any]] = []
-        for a in actions:
-            if a.get("type") in allowed:
-                kept.append(a)
-            else:
-                self.logger.warning(
-                    f"Action '{a.get('type')}' rejected; not in allowed_actions={allowed}"
-                )
-        if not kept:
-            self.logger.warning(
-                f"No actions left after allowed_actions filter. "
-                f"Original actions: {actions}"
-            )
-        return kept
-
-    def _execute_actions(self, actions: List[Dict[str, Any]], ctx: ActionContext) -> None:
-        """
-        Execute actions in sequence.
-        """
-        for idx, action_dict in enumerate(actions, start=1):
-            action_type = action_dict.get("type")
-            params = action_dict.get("params", {})
-
-            action_obj: BaseAction = ActionRegistry.create(action_type)
-
-            ctx.logger.info(f"Executing action #{idx}: {action_type}")
+        for action_obj in actions:
+            action_type = action_obj["type"]
+            params = action_obj.get("params", {})
 
             try:
-                action_obj.execute(ctx, params)
-            except Exception as e:
-                ctx.logger.error(
-                    f"Exception during action '{action_type}': {e}",
-                    exc_info=True,
+                action: BaseAction = ActionRegistry.create(action_type)
+            except ValueError as e:
+                self.logger.error(f"Unknown action type '{action_type}': {e}")
+                return RunResult(success=False, should_break=True)
+
+            action.execute(ctx, params)
+
+            # Control-flow checks after each action
+            if ctx.should_break:
+                return RunResult(success=True, should_break=True)
+
+            if ctx.change_strategy_requested:
+                return RunResult(
+                    success=True,
+                    change_strategy_requested=True,
+                    change_strategy_reason=ctx.change_strategy_reason,
                 )
-                # leave ctx flags as-is; executor will stop run.
-                break
+
+        # Completed all actions without break/strategy-change
+        return RunResult(success=True, should_continue=True)
