@@ -1,0 +1,18 @@
+{
+  "blocks": [
+    {
+      "attempts": [
+        {
+          "profile_file": "context_files/profiles/gemini/gemini_codegen.json",
+          "provider": "gemini",
+          "context_files": []
+        },
+        {
+          "profile_file": "context_files/profiles/gemini/gemini_codegen.json",
+          "provider": "gemini",
+          "context_files": []
+        }
+      ]
+    }
+  ]
+}

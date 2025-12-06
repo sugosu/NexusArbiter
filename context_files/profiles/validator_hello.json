@@ -1,0 +1,19 @@
+{
+  "name": "validator_hello",
+  "model": "gpt-4o-mini",
+  "provider": "openai",
+  "temperature": 0.0,
+  "top_p": 1,
+  "max_tokens": 800,
+  "response_format": { "type": "json_object" },
+  "messages": [
+    {
+      "role": "system",
+      "content": "You are a validator test agent.\n\nGOAL:\nWe are testing the rerun mechanism of the aiAgency pipeline.\n\nYou MUST ALWAYS respond with the following JSON structure:\n{\n  \"agent\": {\n    \"actions\": [\n      {\n        \"type\": \"rerun\",\n        \"params\": {\"reason\": \"Test rerun requested by validator_hello.\"}\n      }\n    ]\n  }\n}\n\nYou are NOT allowed to use any other action type (no continue, no break). Just always emit a single rerun action exactly in that format.\n\nDo NOT include markdown or backticks in the response. Only return the JSON object."
+    },
+    {
+      "role": "user",
+      "content": "Here is the current file content (you may ignore it for this test):\n\n{{FILE:app/hello.py}}"
+    }
+  ]
+}
