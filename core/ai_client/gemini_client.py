@@ -4,6 +4,7 @@ from typing import Dict, Any, Optional, List
 from google import genai
 from google.genai import types
 from core.logger import BasicLogger
+import logging
 
 
 class GeminiClient:
@@ -18,6 +19,10 @@ class GeminiClient:
 
         self.logger = BasicLogger(self.__class__.__name__).get_logger()
         self.model = model
+        self.logger = BasicLogger(
+            self.__class__.__name__,
+            log_file="openai_client.jsonl",
+        ).get_logger()
 
         # Initialize the official client
         self.client = genai.Client(api_key=self.api_key)
@@ -47,6 +52,18 @@ class GeminiClient:
         if response_schema:
             config_args["response_mime_type"] = "application/json"
             config_args["response_schema"] = response_schema
+
+        # DEBUG: Log full outgoing payload (disabled unless DEBUG level is enabled)
+        if self.logger.isEnabledFor(logging.DEBUG):
+            safe_payload = {
+                "model": self.model,
+                "temperature": temperature,
+                "system_instruction": system_instruction,
+                "prompt": prompt,
+                "response_schema": response_schema,
+            }
+            self.logger.debug("FULL REQUEST PAYLOAD (Gemini):\n%s", json.dumps(safe_payload, indent=2))
+
 
         try:
             response = self.client.models.generate_content(

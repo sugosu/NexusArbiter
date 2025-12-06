@@ -105,10 +105,10 @@ class OpenAIClient:
         )
 
         # Optional: pretty dump for console
-#        self.logger.info(
-#            "FULL REQUEST PAYLOAD:\n%s",
-#            json.dumps(sanitized_body, indent=2),
-#        )
+        self.logger.info(
+            "FULL REQUEST PAYLOAD:\n%s",
+            json.dumps(sanitized_body, indent=2),
+        )
 
         response = requests.post(
             self.api_url,
