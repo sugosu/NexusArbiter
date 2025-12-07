@@ -17,7 +17,8 @@ venv/
 *.log
 
 # this is for myself
-merge_py.py
+.merge_py.py
+.merged_all.txt
 
 *.txt
 
