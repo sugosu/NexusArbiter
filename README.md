@@ -23,9 +23,8 @@ Provider selection may occur in:
 • strategy-level rerun overrides  
 
 ### Deterministic Action Contract
-Every model must return a JSON object containing an agent.actions array.  
-No free-form output, no ambiguity.  
-Pipelines remain safe and reproducible.
+Models must return a structured JSON response with an agent.actions array.
+This ensures predictable behavior and eliminates ambiguity during execution.
 
 ### Strategy-Based Reruns
 Validators can request reruns of earlier steps.  
