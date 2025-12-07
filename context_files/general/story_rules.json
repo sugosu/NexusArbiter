@@ -1,0 +1,192 @@
+{
+  "implementation_story_rules": {
+    "mode": "strict",
+    "structure": [
+      "System Overview & Goals",
+      "Environment & Execution Model",
+      "Actors & External Interfaces",
+      "Core Concepts & Domain Objects",
+      "State Model & State Transitions",
+      "Lifecycle / Main Flow",
+      "Modules & Responsibilities",
+      "Classes & Methods",
+      "Data Structures & Types",
+      "Configuration Parameters",
+      "Randomness & Non-determinism",
+      "Error Handling & Failure Modes",
+      "Logging & Observability",
+      "Performance & Resource Constraints",
+      "Security & Validation",
+      "Extension Points & Customization",
+      "Testing Strategy & Testability"
+    ],
+
+    "requirements": {
+      "overview": {
+        "must_define": [
+          "Purpose of the system in clear terms",
+          "Primary goals and success criteria",
+          "Non-goals (what is explicitly out of scope)",
+          "Global constraints or assumptions"
+        ]
+      },
+
+      "environment": {
+        "must_define": [
+          "Runtime model (single-process, multi-process, distributed)",
+          "Execution model (loop/tick-based, event-driven, request-response, batch)",
+          "Entrypoint component and who calls it",
+          "Persistence expectations (purely in-memory, local files, external database or services)",
+          "Whether the system includes a user interface layer or is headless"
+        ]
+      },
+
+      "actors": {
+        "must_define": [
+          "All human actors that interact with the system",
+          "All external systems or services the system depends on",
+          "For each actor or external system: direction of interaction (who calls whom) and the high-level purpose of the interaction"
+        ]
+      },
+
+      "core_concepts": {
+        "must_define": [
+          "All key domain concepts and domain objects",
+          "For each: identity, key attributes and conceptual types",
+          "For each: invariants that must always hold (constraints on valid states)",
+          "Distinguish domain-level data from purely technical structures"
+        ]
+      },
+
+      "state_model": {
+        "must_define": [
+          "At least one explicit state machine for the primary workflow or component",
+          "Named states (e.g. IDLE, RUNNING, PAUSED, ERROR) with precise meaning",
+          "Allowed transitions between states, including triggering events/conditions",
+          "The specific class or module responsible for holding and updating the current state"
+        ]
+      },
+
+      "lifecycle": {
+        "must_define": [
+          "System initialization sequence (which components are constructed/initialized and in which order)",
+          "A canonical single-cycle or single-interaction flow described step by step, in strict order",
+          "For each step: which module or class performs it, what input it consumes, and what output or side effects it produces",
+          "System termination or shutdown behaviour, including any cleanup or resource release"
+        ]
+      },
+
+      "modules": {
+        "must_define": [
+          "Full list of modules with clear responsibilities",
+          "For each module: explicit non-responsibilities (what it does NOT do, to avoid overlap and ambiguity)",
+          "For each module: its dependencies on other modules (who it calls, who calls it)"
+        ]
+      },
+
+      "classes_methods": {
+        "must_define": [
+          "For each module: all important classes with purpose and role in the system",
+          "For each class: fields/properties with conceptual types and descriptions",
+          "For each class: all important public methods with purpose",
+          "For each method: parameters (name, type, allowed values, meaning), return type and meaning",
+          "For each method: side effects (internal state changes, calls to other components, I/O) and error behaviour (what happens on invalid input or failure)",
+          "No method may be described vaguely; descriptions MUST allow direct implementation without guessing"
+        ]
+      },
+
+      "data_structures": {
+        "must_define": [
+          "A dedicated section listing all key data structures used in the system",
+          "For each data structure: all fields with conceptual types and clear descriptions",
+          "Define all important enums and code sets (e.g. status types, error codes, event types)",
+          "Define message/event payloads with fields and types when the system is event-driven or message-oriented"
+        ]
+      },
+
+      "configuration": {
+        "must_define": [
+          "At least one central configuration object (e.g. SystemConfig) that aggregates tunable parameters",
+          "For each configuration parameter: name, type, semantic meaning, and typical or allowed ranges",
+          "Explicitly state which modules/classes read each configuration parameter",
+          "Clearly distinguish tunable configuration values from hard-coded domain constants"
+        ]
+      },
+
+      "randomness": {
+        "must_define": [
+          "Whether the system uses any randomness or probabilistic behaviour",
+          "If it does: the exact algorithm or policy (e.g. uniform random, weighted, no-repeat until a set is exhausted)",
+          "How seeding is handled (fixed seed, external seed, per-run seed, or none)",
+          "Which component owns and encapsulates the random generator and how other components interact with it"
+        ],
+        "if_none": "If no randomness is used, the story MUST explicitly state that the system is fully deterministic."
+      },
+
+      "error_handling": {
+        "must_define": [
+          "A global error-handling policy describing when to throw, when to return structured error values, and when to emit error events",
+          "For each major module: typical error conditions and how they are handled (propagated, recovered locally, logged, or converted into state transitions)",
+          "If a central error type or error hierarchy is used, define it in the data structures section",
+          "Clarify which errors are considered recoverable and which are fatal for the current operation or for the whole system"
+        ]
+      },
+
+      "logging_observability": {
+        "must_define": [
+          "Which modules are responsible for logging and what kind of information they log",
+          "Key events or state changes that MUST be logged (e.g. state transitions, failed operations, critical external calls)",
+          "Logging levels used (info, debug, warning, error) and what type of events map to which level",
+          "If metrics or traces are relevant, describe which metrics are tracked and where they are emitted"
+        ]
+      },
+
+      "performance": {
+        "must_define": [
+          "Whether performance is a concern for this system",
+          "If it is: performance targets or constraints (latency, throughput, memory limits, or scale expectations)",
+          "Identify performance-critical code paths or operations",
+          "Mention any data structures or design choices that are selected primarily for performance reasons"
+        ],
+        "if_not_applicable": "If performance is not a concern, the story MUST explicitly state that no specific performance guarantees are required beyond basic responsiveness."
+      },
+
+      "security_validation": {
+        "must_define": [
+          "How incoming data is validated (structural validation, value ranges, required fields)",
+          "If applicable: authentication or authorization responsibilities, even at a conceptual level",
+          "Any data integrity or confidentiality requirements the system must observe"
+        ],
+        "if_not_applicable": "If security and advanced validation are out of scope, the story MUST explicitly state this, while still describing any minimal validation rules required for correct operation."
+      },
+
+      "extension_points": {
+        "must_define": [
+          "Where the system is designed to be extended (for example via strategies, plugins, or optional modules)",
+          "For each extension point: the interface or contract that new implementations must follow",
+          "How extensions are registered or discovered (configuration, registration APIs, dependency injection, etc.)"
+        ]
+      },
+
+      "testing": {
+        "must_define": [
+          "Testing strategy at a high level (unit tests, integration tests, end-to-end tests)",
+          "For each major module: at least one core unit or class that is suitable for isolated unit testing",
+          "Important scenarios that must be testable: typical success flows, error flows, and boundary conditions",
+          "Any test doubles implied by the design (mocks, stubs, fake implementations) and where they are used"
+        ]
+      }
+    },
+
+    "meta_rules": {
+      "style": [
+        "Output MUST be plain text (no markdown, no backticks, no code fences).",
+        "Descriptions MUST be exhaustive and implementation-oriented; brevity is not a goal.",
+        "Avoid vague language such as 'etc.', 'and so on', 'might', 'may' without further clarification.",
+        "All behaviour MUST be defined deterministically, unless explicitly described under randomness rules.",
+        "Every module, class, method, and data structure mentioned anywhere in the story MUST be described in enough detail to allow direct implementation without guessing.",
+        "If any section is not applicable, the story MUST explicitly state that it is not applicable and briefly explain why."
+      ]
+    }
+  }
+}

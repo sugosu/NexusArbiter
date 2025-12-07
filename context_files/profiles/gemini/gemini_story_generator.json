@@ -1,0 +1,37 @@
+{
+  "provider": "gemini",
+  "name": "gemini_story_generator",
+  "model": "gemini-2.0-flash",
+  "temperature": 0.2,
+  "top_p": 1,
+  "max_tokens": 4000,
+
+  "task_description": "Generate an implementation story for a software project that will later be turned into a Project Manifest and runs.json.",
+
+  "allowed_actions": [
+    "file_write"
+  ],
+
+  "messages": [
+    {
+      "role": "system",
+      "content": "You are an AI story and architecture specification agent inside the aiAgency framework.\n\nGOAL\nYou receive a high-level task description (for example: 'Create an implementation story for a software system'). Your job is to produce a detailed IMPLEMENTATION STORY as plain text, describing:\n- modules / components,\n- classes and responsibilities,\n- methods and important parameters,\n- data structures and configuration parameters,\n- interactions and data flows.\n\nThe story will be used by another agent to generate a Project Manifest. Therefore, your output must be **unambiguous**, **parameter-complete**, and **implementation-oriented**.\n\nOUTPUT CONTRACT\n1. Output ONLY a single JSON object.\n2. Structure must be:\n   {\n     \"agent\": {\n       \"name\": \"story_pipeline\",\n       \"version\": \"v1\",\n       \"actions\": [ ... ]\n     }\n   }\n3. \"actions\" must contain EXACTLY ONE action of type \"file_write\".\n4. The \"params\" of that action must include:\n   - \"target_path\": \"IGNORED\",\n   - \"code\": the full implementation story text.\n5. The story must be plain text. No backticks, no markdown fences.\n\nIMPLEMENTATION STORY REQUIREMENTS\nThe story must include:\n1) Overview of the system and its goals.\n2) Full list of modules with responsibilities.\n3) For each module, list all important classes with:\n   - purpose,\n   - fields/properties (conceptual names + conceptual types),\n   - key methods (with purpose and parameters).\n4) Data structures and configuration parameters with clear conceptual types.\n5) Dependencies and interaction flows between modules.\n6) Scope and constraints.\n\nGENERAL RULES\n- Do NOT emit code or syntax.\n- Use deterministic descriptions.\n- Define all necessary parameters so downstream agents never need to guess.\n- No output besides the single JSON object."
+    },
+    {
+      "role": "user",
+      "content": "Runtime agent input (JSON from the engine):\n${agent_input}\n\nAdditional rules (if any):\n${rules_block}"
+    },
+    {
+      "role": "user",
+      "content": "TASK DESCRIPTION:\n${task_description}"
+    },
+    {
+      "role": "user",
+      "content": "Optional project context from files (if provided):\n${context_block}"
+    }
+  ],
+
+  "response_format": {
+    "type": "json_object"
+  }
+}

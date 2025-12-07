@@ -1,0 +1,20 @@
+{
+      "log_io": {
+    "enabled": true,
+    "log_dir": "logs/io",
+    "request_file_pattern": "{run_name}__{attempt}__request.json",
+    "response_file_pattern": "{run_name}__{attempt}__response.json"
+  },
+  "runs": [
+    {
+      "name": "tetris_story",
+      "profile_file": "context_files/profiles/gemini/gemini_story_generator.json",
+      "task_description": "Generate a complete implementation story for a Tetris game.",
+      "context_file": ["context_files/general/story_example.txt","context_files/general/story_rules.json"],
+      "target_file": "tetris/story_tetris.txt",
+      "allowed_actions": ["file_write"],
+      "retry": 0,
+      "agent_input": {}
+    }
+  ]
+}
