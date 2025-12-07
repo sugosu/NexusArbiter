@@ -1,359 +1,178 @@
-````markdown
 # NexusArbiter
 
-### Deterministic Multi-Agent Orchestration Engine  
-Strategy Arbitration • Provider-Agnostic Workflows • JSON-Driven Pipelines • Automatic Action Execution
+NexusArbiter is a deterministic, multi-provider AI orchestration framework designed for reliable code generation pipelines, structured execution flows, and advanced strategy-based reruns. It unifies OpenAI, Gemini, and custom providers into a consistent execution engine with traceable inputs, validated outputs, and reproducible runs.
 
----
+NexusArbiter focuses on:
 
-## Table of Contents
+• Determinism – outputs must be structured and predictable  
+• Traceability – optional logging for requests and responses  
+• Control – explicit actions such as file_write, continue, break, rerun  
+• Extensibility – profiles, runs, and strategies are modular  
+• Reliability – system retry and controlled rerun attempts  
 
-- [Overview](#overview)
-- [Features](#features)
-- [Architecture Overview](#architecture-overview)
-- [Installation](#installation)
-- [Usage](#usage)
-- [Configuration](#configuration)
-- [Example Workflows](#example-workflows)
-- [Project Structure](#project-structure)
-- [Roadmap](#roadmap)
-- [Contributing](#contributing)
-- [License](#license)
-- [Attribution](#attribution)
+------------------------------------------------------------
 
----
+## Key Features
 
-## Overview
+### Multi-provider AI Execution
+You can run OpenAI, Gemini, or custom providers in a single pipeline.  
+Provider selection may occur in:
 
-**NexusArbiter** is a general-purpose multi-agent orchestration framework designed for deterministic, repeatable, and auditable AI-driven workflows.
+• profiles  
+• run configuration  
+• strategy-level rerun overrides  
 
-It reads declarative **run configurations** and **profile definitions**, merges context files, invokes AI providers (OpenAI, Gemini, etc.), interprets model-generated actions, and executes them through a controlled, rule-driven pipeline.
+### Deterministic Action Contract
+Every model must return a JSON object containing an agent.actions array.  
+No free-form output, no ambiguity.  
+Pipelines remain safe and reproducible.
 
-NexusArbiter is suitable for:
+### Strategy-Based Reruns
+Validators can request reruns of earlier steps.  
+Strategies define:
 
-- autonomous code generation  
-- automated refactoring and validation  
-- structured content transformation  
-- multi-step reasoning pipelines  
-- general AI workflow automation  
+• number of attempts  
+• alternative profiles  
+• alternative providers  
+• alternative context files  
 
----
+Once attempts are exhausted, the validator continues execution.
 
-## Features
+### System Retry Policy
+Retry logic handles:
 
-### Provider-Agnostic Engine
-Supports multiple AI providers:
-- OpenAI  
-- Gemini  
-- Extensible provider system  
+• timeouts  
+• 429 (rate limit)  
+• 5xx server errors  
+• network errors  
 
-Profiles define model parameters. Runs may override providers dynamically.
+Configured globally in runs.json.
 
----
+### Optional Request/Response Logging
+When enabled, NexusArbiter writes:
 
-### JSON-Driven Pipeline Execution
-All execution logic is defined in JSON:
-- `runs.json` outlines the execution sequence  
-- Profiles describe model behavior and prompt structure  
-- Context files are dynamically merged and injected  
+• request payloads  
+• raw responses  
+• metadata (run, attempt, provider)  
 
-Pipelines become portable, deterministic, and version-controlled.
+to disk for debugging and auditing.
 
----
+------------------------------------------------------------
 
-### Strategy Arbitration & Retry Engine
-NexusArbiter supports structured AI-driven decision arbitration:
-- rerun strategy files  
-- retry logic  
-- provider overrides  
-- allowed-actions filters  
-- deterministic halting via `break`  
+## Repository Structure
 
-This enables flexible, powerful workflows while retaining strict control.
+NexusArbiter/
+  core/
+    actions/
+    ai_client/
+    config/
+    logger/
+    runtime/
+    strategy/
+    utils/
+  context_files/
+    profiles/
+    runs/
+    strategies/
+    general/
+  app/
+  tests/
+  README.md
+  LICENSE
 
----
+------------------------------------------------------------
 
-### Action Execution System
-Models output structured JSON actions, for example:
+## How NexusArbiter Works
 
-```json
-{
-  "agent": {
-    "actions": [
-      {
-        "type": "file_write",
-        "params": {
-          "target_path": "app/main.py",
-          "content": "print('Hello World')"
-        }
-      }
-    ]
-  }
-}
-````
+### 1. RunConfig Loads Pipeline Definition
+Runs.json defines the steps to execute, along with allowed actions, profiles, strategies, and parameters.
 
-Built-in actions include:
+### 2. PipelineRunner Executes Runs
+It manages:
 
-* `file_write`
-* `file_read`
-* `validator`
-* `continue`
-* `break`
-* `trigger_retry`
+• ordering  
+• retry attempts  
+• rerun triggers  
+• break / continue flow  
 
-Actions are executed deterministically and logged.
+### 3. AppRunner Handles Provider Invocation
+AppRunner loads a profile, builds a prompt, calls the provider, parses the structured output, and executes the actions.
 
----
+### 4. Action Execution Layer
+Available built-in actions:
 
-### Deterministic Logging (“Pipeline Story”)
+• file_write  
+• continue  
+• break  
+• rerun  
 
-Every decision and event is logged to allow full reconstruction of:
+Actions update the environment and control the pipeline.
 
-* what happened
-* why it happened
-* which agent or strategy decided it
-* which provider and profile were used
-* what actions were executed
-* retry and break conditions
+### 5. Validator-Driven Reruns
+Validators may request reruns, activating a strategy block.  
+Overrides may modify:
 
-Example:
+• provider  
+• profile  
+• context files  
 
-```
-Pipeline started
-Warp field stabilized.
-[RUN] Starting 'codegen_step'
-Prepared model payload (provider=openai model=gpt-5-turbo)
-Executing action #1: file_write → app/main.py
-```
+Execution then returns to the validator until attempts expire.
 
----
+------------------------------------------------------------
 
-### Context Aggregation
-
-Profiles support `${agent_input}`, `${context_block}`, and `${task_description}` placeholders.
-
-NexusArbiter loads, merges, and injects context file content automatically.
-
----
-
-### Extensible Architecture
-
-Core components are modular:
-
-* providers
-* actions
-* profiles
-* strategies
-* validators
-* logging
-
-Adding new provider clients or actions requires minimal code.
-
----
-
-## Architecture Overview
-
-NexusArbiter follows a layered orchestration model:
-
-```
-               +---------------------+
-               |    PipelineRunner   |
-               | (executes runs.json)|
-               +----------+----------+
-                          |
-                          v
-               +---------------------+
-               |     RunExecutor     |
-               | (retry + strategy)  |
-               +----------+----------+
-                          |
-                          v
-               +---------------------+
-               |      AppRunner      |
-               | (profile, AI call,  |
-               |  context merging)   |
-               +----------+----------+
-                          |
-                          v
-               +---------------------+
-               |   Provider Client   |
-               |  (OpenAI/Gemini)    |
-               +----------+----------+
-                          |
-                          v
-               +---------------------+
-               |    Action Engine    |
-               | (file ops, checks)  |
-               +---------------------+
-```
-
----
-
-## Installation
-
-```bash
-git clone https://github.com/sugosu/NexusArbiter.git
-cd NexusArbiter
-pip install -r requirements.txt
-```
-
-Optional virtual environment:
-
-```bash
-python -m venv venv
-venv\Scripts\activate   # Windows
-source venv/bin/activate  # Linux/Mac
-```
-
----
-
-## Usage
-
-### Running a pipeline
-
-```bash
-python main.py --config context_files/runs/example.json
-```
-
-This executes the sequence defined in `runs.json` and logs the pipeline narrative.
-
----
-
-### Creating a new run
-
-```json
-{
-  "name": "generate_component",
-  "profile_file": "context_files/profiles/code_generation.json",
-  "context_files": [
-    "context_files/project_manifest.json"
-  ],
-  "target_file": "app/component.py",
-  "allowed_actions": [
-    "file_write",
-    "validator",
-    "trigger_retry",
-    "continue"
-  ]
-}
-```
-
----
-
-## Configuration
+## Profiles, Context, and Strategies
 
 ### Profiles
+Define:
 
-```json
-{
-  "model": "gpt-5-turbo",
-  "provider": "openai",
-  "messages": [
-    { "role": "system", "content": "Act as a senior architect." },
-    { "role": "user", "content": "${agent_input}\n\n${context_block}" }
-  ],
-  "response_format": { "type": "json_object" }
-}
-```
+• provider and model  
+• temperature, top_p, max_tokens  
+• system and user templates  
+• placeholders such as task_description, agent_input, rules_block, context_block  
 
----
+### Context Files
+Used to inject:
+
+• prior outputs  
+• code  
+• configuration  
+• reference material  
 
 ### Strategies
+Define deterministic rerun behavior via blocks and attempts, enabling correction cycles.
 
-```json
-{
-  "attempts": [
-    { "profile": "profile_1.json" },
-    { "profile": "profile_2.json" }
-  ]
-}
-```
+------------------------------------------------------------
 
----
+## Testing
 
-### Allowed Actions
+The framework includes tests for:
 
-Runs strictly filter which actions the model may produce.
+• file_write, continue, break, rerun actions  
+• strategy loading  
+• rerun control flow  
+• registry correctness  
+• provider behavior stubs  
 
----
+Additional integration tests can be added for full pipelines.
 
-## Example Workflows
-
-### 1. Automated Code Generation Workflow
-
-* Load project manifest
-* Generate module
-* Validate output
-* Retry with alternate strategy if validation fails
-
-### 2. Refactoring Workflow
-
-* Load existing code
-* Ask AI to refactor
-* Validate style and structure
-* Write file only if validation passes
-
-### 3. Documentation Workflow
-
-* Generate documentation based on context files
-* Validate structure
-* Write markdown output
-
----
-
-## Project Structure
-
-```
-core/
-  runtime/
-    pipeline_runner.py
-    run_executor.py
-    app_runner.py
-  actions/
-    base_action.py
-    registry.py
-  ai_client/
-    openai_client.py
-    gemini_client.py
-    ai_response_parser.py
-context_files/
-  profiles/
-  runs/
-  strategies/
-app/
-main.py
-```
-
----
+------------------------------------------------------------
 
 ## Roadmap
 
-* Strict JSON validation module
-* Token usage metering
-* Support for additional AI providers
-* CLI utility
-* Third-party action plugins
-* Workflow visualization tools
-* Automated diff validators
-* VS Code extension
+Future enhancements include:
 
----
+• structured per-attempt logs  
+• parallel execution engine  
+• expanded provider compatibility  
+• CLI tooling  
+• visual pipeline debugger  
+• browser UI for traces  
+• plugin system for custom actions  
+• curated example pipelines (e.g., full project generators)
 
-## Contributing
-
-1. Fork this repository
-2. Create a feature branch
-
-   ```bash
-   git checkout -b feature/my-feature
-   ```
-3. Commit your changes
-4. Push your branch and open a Pull Request
-
-Contributions are welcome.
-
----
+------------------------------------------------------------
 
 ## License
 
-MIT License
+This project is licensed under the MIT License.
+See the LICENSE file for details.
