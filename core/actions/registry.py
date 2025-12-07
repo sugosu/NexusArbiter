@@ -12,7 +12,7 @@ from core.actions.rerun_action import RerunAction
 
 class ActionRegistry:
     """
-    Central registry for all action types in aiAgency.
+    Central registry for all action types in NexusArbiter.
 
     - Actions are identified by their `action_type` string.
     - Models emit actions with a `"type"` field that must match a registered

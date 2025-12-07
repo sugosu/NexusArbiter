@@ -11,7 +11,7 @@ from core.runtime.pipeline_runner import PipelineRunner
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="aiAgency – AI Code Generation Framework")
+    parser = argparse.ArgumentParser(description="NexusArbiter – AI Code Generation Framework")
     parser.add_argument(
         "--config",
         type=str,

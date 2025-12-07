@@ -1,6 +1,6 @@
 {
   "name": "actions_spec",
-  "description": "Definitions of available actions in aiAgency.",
+  "description": "Definitions of available actions in NexusArbiter.",
   "actions": [
     {
       "type": "file_write",

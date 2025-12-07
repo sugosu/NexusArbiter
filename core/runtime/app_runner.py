@@ -287,7 +287,7 @@ class AppRunner:
         if not isinstance(content, dict):
             raise ValueError("Model response message content is not a JSON object")
 
-        # 4) Now expect the aiAgency contract: content["agent"]["actions"]
+        # 4) Now expect the NexusArbiter contract: content["agent"]["actions"]
         agent = content.get("agent")
         if not isinstance(agent, dict):
             raise ValueError("Model response missing 'agent' object")

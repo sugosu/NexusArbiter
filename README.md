@@ -1,5 +1,5 @@
 ````markdown
-# AgentArbiter
+# NexusArbiter
 
 ### Deterministic Multi-Agent Orchestration Engine  
 Strategy Arbitration • Provider-Agnostic Workflows • JSON-Driven Pipelines • Automatic Action Execution
@@ -25,11 +25,11 @@ Strategy Arbitration • Provider-Agnostic Workflows • JSON-Driven Pipelines �
 
 ## Overview
 
-**AgentArbiter** is a general-purpose multi-agent orchestration framework designed for deterministic, repeatable, and auditable AI-driven workflows.
+**NexusArbiter** is a general-purpose multi-agent orchestration framework designed for deterministic, repeatable, and auditable AI-driven workflows.
 
 It reads declarative **run configurations** and **profile definitions**, merges context files, invokes AI providers (OpenAI, Gemini, etc.), interprets model-generated actions, and executes them through a controlled, rule-driven pipeline.
 
-AgentArbiter is suitable for:
+NexusArbiter is suitable for:
 
 - autonomous code generation  
 - automated refactoring and validation  
@@ -62,7 +62,7 @@ Pipelines become portable, deterministic, and version-controlled.
 ---
 
 ### Strategy Arbitration & Retry Engine
-AgentArbiter supports structured AI-driven decision arbitration:
+NexusArbiter supports structured AI-driven decision arbitration:
 - rerun strategy files  
 - retry logic  
 - provider overrides  
@@ -132,7 +132,7 @@ Executing action #1: file_write → app/main.py
 
 Profiles support `${agent_input}`, `${context_block}`, and `${task_description}` placeholders.
 
-AgentArbiter loads, merges, and injects context file content automatically.
+NexusArbiter loads, merges, and injects context file content automatically.
 
 ---
 
@@ -153,7 +153,7 @@ Adding new provider clients or actions requires minimal code.
 
 ## Architecture Overview
 
-AgentArbiter follows a layered orchestration model:
+NexusArbiter follows a layered orchestration model:
 
 ```
                +---------------------+
@@ -192,8 +192,8 @@ AgentArbiter follows a layered orchestration model:
 ## Installation
 
 ```bash
-git clone https://github.com/sugosu/AgentArbiter.git
-cd AgentArbiter
+git clone https://github.com/sugosu/NexusArbiter.git
+cd NexusArbiter
 pip install -r requirements.txt
 ```
 

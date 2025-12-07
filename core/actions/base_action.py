@@ -29,7 +29,7 @@ class ActionContext:
 
 class BaseAction:
     """
-    Base class for all actions inside aiAgency.
+    Base class for all actions inside NexusArbiter.
     Subclasses implement `execute(self, ctx, params)`.
     """
 
