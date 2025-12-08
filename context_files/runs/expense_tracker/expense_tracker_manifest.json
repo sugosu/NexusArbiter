@@ -13,9 +13,9 @@
       "task_description": "Generate a complete, manifest.json from given story file. Describing modules, classes, files, dependencies, config parameters, and build instructions.",
       "context_file": [
         "context_files/general/manifest_example.json",
-        "context_files/stories/tetris_story.txt"
+        "expense_tracker/story_expense_tracker.txt"
       ],
-      "target_file": "tetris/manifest/manifest.json",
+      "target_file": "expense_tracker/manifest/manifest.json",
       "allowed_actions": ["file_write"],
       "retry": 0,
       "agent_input": {}
@@ -26,11 +26,11 @@
       "profile_file": "context_files/profiles/openai/manifest_validator.json",
       "task_description": "Validate the generated manifest.json against strict manifest rules. Produce a validation report and, if required, request a rerun of the generation step with refined instructions.",
       "context_file": [
-        "tetris/manifest/manifest.json",
+        "expense_tracker/manifest/manifest.json",
         "context_files/general/manifest_example.json",
-        "context_files/stories/tetris_story.txt"
+        "expense_tracker/story_expense_tracker.txt"
       ],
-      "target_file": "tetris/manifest/manifest_validation.json",
+      "target_file": "expense_tracker/manifest/manifest_validation.json",
 
       "rerun_index": 0,
       "target_run": "manifest_generator",

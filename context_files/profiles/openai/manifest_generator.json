@@ -5,7 +5,7 @@
   "top_p": 1,
   "max_tokens": 50000,
 
-  "task_description": "Generate a complete, domain-generic manifest.json describing modules, components, files, configuration, dependencies, and build/test instructions for the given system or project.",
+  "task_description": "Generate a complete, manifest.json for the given task, describing modules, components, files, configuration, dependencies, for the given system or project.",
 
   "messages": [
     {

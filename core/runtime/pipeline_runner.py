@@ -260,6 +260,10 @@ class PipelineRunner:
             target_run.provider_override = attempt_cfg.provider
         if attempt_cfg.context_files is not None:
             target_run.context_file = attempt_cfg.context_files
+            pretty = ", ".join(attempt_cfg.context_files)
+            self.logger.info(
+                f"[RERUN] Context override applied: {pretty}"
+            )
 
         self.logger.info(
             f"[RERUN] Applying rerun attempt {current_attempt + 1}/{len(block.attempts)} "

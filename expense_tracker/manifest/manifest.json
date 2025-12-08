@@ -1,0 +1,302 @@
+{
+  "metadata": {
+    "name": "ExpenseTracker",
+    "description": "Single-file JSON expense ledger with deterministic serialization, atomic writes, and domain validation.",
+    "version": "1.0.0",
+    "language": "python",
+    "source_story": "expense_tracker/story_expense_tracker.txt"
+  },
+  "system_overview": {
+    "purpose": "Persist and manage a simple expense ledger stored as a single, human-readable JSON file. Deterministic behavior, atomic writes, and stable pretty-printed serialization.",
+    "primary_goals": [
+      "Persist all domain data in a single JSON file at a configurable path.",
+      "Maintain a stable, pretty-printed JSON schema with deterministic field ordering.",
+      "Encapsulate all filesystem operations in a repository that performs atomic writes to prevent corruption.",
+      "Provide read-modify-write operations so business logic never accesses the filesystem directly.",
+      "Enforce validation rules and invariants on all modifications."
+    ],
+    "non_goals": [
+      "No remote or distributed storage; local filesystem only.",
+      "No support for concurrent multi-process writers.",
+      "No GUI responsibilities in the core modules.",
+      "No binary or compact persistence formats."
+    ]
+  },
+  "environment": {
+    "runtime_model": "single_process",
+    "execution_model": "synchronous request-response; no background jobs",
+    "entrypoint": "AppController.start() exposes ExpenseService to adapters (CLI/API)",
+    "persistence": "single_file_json",
+    "headless_core": true
+  },
+  "state_model": {
+    "states": [
+      { "name": "INIT", "description": "Application starting; repository initialization and store repair occur.", "terminal": false },
+      { "name": "READY", "description": "Initialized; accepts requests.", "terminal": false },
+      { "name": "ERROR", "description": "Fatal condition preventing safe operation.", "terminal": false },
+      { "name": "SHUTDOWN", "description": "Terminating; no new operations accepted.", "terminal": true }
+    ],
+    "transitions": [
+      { "from": "INIT", "to": "READY", "trigger": "initialize_success", "owner": "AppController" },
+      { "from": "INIT", "to": "ERROR", "trigger": "unrecoverable_init_failure", "owner": "AppController" },
+      { "from": "READY", "to": "ERROR", "trigger": "unrecoverable_runtime_error", "owner": "AppController" },
+      { "from": "READY", "to": "SHUTDOWN", "trigger": "shutdown_request", "owner": "AppController" },
+      { "from": "ERROR", "to": "SHUTDOWN", "trigger": "shutdown_after_error", "owner": "AppController" }
+    ],
+    "state_owner": "AppController"
+  },
+  "modules": [
+    {
+      "name": "Config",
+      "layer": "core",
+      "responsibilities": [
+        "Provide runtime configuration and tunables (store path, categories, defaults).",
+        "Expose serializer field order and pretty-print settings."
+      ],
+      "non_responsibilities": ["No persistence IO; no domain validation beyond basic sanity checks."],
+      "components": [
+        { "name": "Config", "type": "config", "file": "src/config.py", "notes": "Immutable runtime configuration object loaded at startup." }
+      ]
+    },
+    {
+      "name": "JsonSerializer",
+      "layer": "infrastructure",
+      "responsibilities": [
+        "Deterministic serialization/deserialization with stable field ordering and pretty-printing.",
+        "Structural parsing of top-level store shape (no domain-level validation)."
+      ],
+      "non_responsibilities": ["No filesystem IO; no domain validation beyond types/shape."],
+      "components": [
+        { "name": "JsonSerializer", "type": "class", "file": "src/serializer.py", "notes": "serialize(store) and deserialize(text) with field_order and indent." }
+      ]
+    },
+    {
+      "name": "AtomicFileWriter",
+      "layer": "infrastructure",
+      "responsibilities": [
+        "Provide atomic_write(target_path, content) using temp file + fsync + rename semantics.",
+        "Ensure temporary files are cleaned up on failure where possible."
+      ],
+      "non_responsibilities": ["No domain validation; no serialization logic."],
+      "components": [
+        { "name": "AtomicFileWriter", "type": "class", "file": "src/atomic_writer.py", "notes": "Platform-abstracted atomic write primitive; fsync configurable." }
+      ]
+    },
+    {
+      "name": "ExpenseRepository",
+      "layer": "persistence",
+      "responsibilities": [
+        "Load, structure-validate, repair (create default) and atomically save the single JSON store.",
+        "Expose read-modify-write perform_transaction(modifier) primitive.",
+        "Assign deterministic monotonic integer ids for new expenses.",
+        "Be the only module that touches filesystem." 
+      ],
+      "non_responsibilities": ["No business rule enforcement beyond structural integrity."],
+      "components": [
+        { "name": "ExpenseRepository", "type": "class", "file": "src/repository.py", "notes": "Implements initialize_store, load_store, save_store, perform_transaction." }
+      ]
+    },
+    {
+      "name": "ExpenseValidator",
+      "layer": "domain",
+      "responsibilities": [
+        "Validate expense fields and settings against domain invariants.",
+        "Produce typed Expense and Settings objects or raise ValidationError with field-specific messages."
+      ],
+      "non_responsibilities": ["No IO; no persistence."],
+      "components": [
+        { "name": "ExpenseValidator", "type": "class", "file": "src/validator.py", "notes": "validate_expense_input and validate_settings." }
+      ]
+    },
+    {
+      "name": "ExpenseService",
+      "layer": "application",
+      "responsibilities": [
+        "Implement business operations: list, get, add, update, delete expenses; get/update settings.",
+        "Coordinate validation and repository transactions.",
+        "Return domain-typed objects to adapters."
+      ],
+      "non_responsibilities": ["No direct filesystem IO."],
+      "components": [
+        { "name": "ExpenseService", "type": "class", "file": "src/service.py", "notes": "Business API used by adapters; raises domain errors." }
+      ]
+    },
+    {
+      "name": "AppController",
+      "layer": "infrastructure",
+      "responsibilities": [
+        "Startup orchestration: construct components from Config, initialize repository (repair or create default).",
+        "Own application lifecycle state machine and provide shutdown semantics.",
+        "Provide a factory for CLI/API adapters to obtain ExpenseService instance." 
+      ],
+      "non_responsibilities": ["No domain validation or persistence beyond invoking repository methods."],
+      "components": [
+        { "name": "AppController", "type": "class", "file": "src/controller.py", "notes": "start(), shutdown(), exposes service to adapters." }
+      ]
+    },
+    {
+      "name": "Models",
+      "layer": "domain",
+      "responsibilities": ["Define domain types: Expense, Settings, ExpenseStore (in-memory shapes)."],
+      "components": [
+        { "name": "models.py", "type": "script", "file": "src/models.py", "notes": "Data classes / type definitions only; no logic." }
+      ]
+    }
+  ],
+  "classes": [
+    {
+      "name": "ExpenseRepository",
+      "module": "ExpenseRepository",
+      "kind": "class",
+      "responsibilities": ["Load, validate structure, repair default store, and persist store atomically."],
+      "attributes": [
+        { "name": "path", "type": "string", "description": "File path to the JSON store (from Config)." },
+        { "name": "serializer", "type": "JsonSerializer", "description": "Serializer for deterministic JSON." },
+        { "name": "writer", "type": "AtomicFileWriter", "description": "Performs atomic writes to filesystem." }
+      ],
+      "methods": [
+        { "name": "initialize_store", "purpose": "Ensure store exists and is structurally valid; create default if missing or corrupted.", "parameters": [], "returns": { "type": "ExpenseStore" }, "errors": ["IOError"] },
+        { "name": "load_store", "purpose": "Read and deserialize store from disk.", "parameters": [], "returns": { "type": "ExpenseStore" }, "errors": ["ParseError", "StructureError", "IOError"] },
+        { "name": "save_store", "purpose": "Serialize and atomically persist provided store.", "parameters": ["store: ExpenseStore"], "returns": { "type": "void" }, "errors": ["IOError"] },
+        { "name": "perform_transaction", "purpose": "Read-modify-write primitive: load store, apply modifier, validate structure, save atomically.", "parameters": ["modifier: function(ExpenseStore)->ExpenseStore"], "returns": { "type": "ExpenseStore" }, "errors": ["ValidationError", "IOError"] }
+      ]
+    },
+    {
+      "name": "JsonSerializer",
+      "module": "JsonSerializer",
+      "kind": "class",
+      "responsibilities": ["Deterministic serialization and stable-key ordering."],
+      "attributes": [
+        { "name": "field_order", "type": "map<string,list<string>>", "description": "Explicit ordering for top-level and nested objects." },
+        { "name": "indent", "type": "int", "description": "Number of spaces for pretty printing." }
+      ],
+      "methods": [
+        { "name": "deserialize", "purpose": "Parse JSON text into ExpenseStore with structural checks.", "parameters": ["raw_text: string"], "returns": { "type": "ExpenseStore" }, "errors": ["ParseError","StructureError"] },
+        { "name": "serialize", "purpose": "Produce stable pretty-printed JSON text from an ExpenseStore.", "parameters": ["store: ExpenseStore"], "returns": { "type": "string" }, "errors": [] }
+      ]
+    },
+    {
+      "name": "AtomicFileWriter",
+      "module": "AtomicFileWriter",
+      "kind": "class",
+      "responsibilities": ["Atomic write semantics: write temp file, fsync, rename."],
+      "attributes": [
+        { "name": "fsync_after_write", "type": "bool", "description": "Whether to fsync file before rename (default true)." },
+        { "name": "temp_suffix", "type": "string", "description": "Temporary file suffix from Config." }
+      ],
+      "methods": [
+        { "name": "atomic_write", "purpose": "Atomically write provided content to target path.", "parameters": ["target_path: string","content: string"], "returns": { "type": "void" }, "errors": ["IOError"] }
+      ]
+    }
+  ],
+  "data_structures": [
+    {
+      "name": "ExpenseStore",
+      "kind": "object",
+      "description": "Top-level in-memory representation of the persisted JSON store.",
+      "fields": [
+        { "name": "expenses", "type": "array<Expense>", "order": 1 },
+        { "name": "settings", "type": "Settings", "order": 2 }
+      ]
+    },
+    {
+      "name": "Expense",
+      "kind": "object",
+      "description": "Domain expense record.",
+      "fields": [
+        { "name": "id", "type": "int", "order": 1 },
+        { "name": "date", "type": "string (YYYY-MM-DD)", "order": 2 },
+        { "name": "amount", "type": "decimal", "order": 3 },
+        { "name": "category", "type": "string", "order": 4 },
+        { "name": "description", "type": "string|null", "order": 5 }
+      ]
+    },
+    {
+      "name": "Settings",
+      "kind": "object",
+      "description": "Global settings stored with the ledger.",
+      "fields": [
+        { "name": "currency", "type": "string (3-letter)", "order": 1 }
+      ]
+    }
+  ],
+  "files": [
+    { "path": "src/config.py", "role": "source", "module": "Config", "description": "Configuration constants and defaults (store_path, allowed_categories, serializer_field_order, json_indent)." },
+    { "path": "src/models.py", "role": "source", "module": "Models", "description": "Domain dataclasses/types: Expense, Settings, ExpenseStore." },
+    { "path": "src/serializer.py", "role": "source", "module": "JsonSerializer", "description": "Deterministic JSON serializer with stable field ordering and pretty-printing." },
+    { "path": "src/atomic_writer.py", "role": "source", "module": "AtomicFileWriter", "description": "Atomic write implementation using temp file, fsync and rename." },
+    { "path": "src/repository.py", "role": "source", "module": "ExpenseRepository", "description": "Repository implementing load, initialize, save and perform_transaction." },
+    { "path": "src/validator.py", "role": "source", "module": "ExpenseValidator", "description": "Domain validation for expenses and settings." },
+    { "path": "src/service.py", "role": "source", "module": "ExpenseService", "description": "Business operations (add/update/delete/list) delegating persistence to repository." },
+    { "path": "src/controller.py", "role": "source", "module": "AppController", "description": "Startup orchestration and lifecycle management; exposes service to adapters." },
+    { "path": "cli/cli_adapter.py", "role": "script", "module": "Adapters", "description": "Optional CLI adapter that calls AppController and ExpenseService." },
+    { "path": "tests/test_validator.py", "role": "test", "module": "tests", "description": "Unit tests for ExpenseValidator." },
+    { "path": "tests/test_serializer_roundtrip.py", "role": "test", "module": "tests", "description": "Round-trip tests for JsonSerializer ordering and pretty-print." },
+    { "path": "tests/test_repository_integration.py", "role": "test", "module": "tests", "description": "Integration tests for repository + atomic writer against temp filesystem." }
+  ],
+  "configuration": {
+    "parameters": [
+      { "key": "store_path", "type": "string", "default": "data/expenses.json", "required": true, "description": "File path for the single JSON expense store.", "used_by": ["ExpenseRepository","AppController"] },
+      { "key": "temp_suffix", "type": "string", "default": ".tmp", "required": true, "description": "Suffix for temporary files used by AtomicFileWriter.", "used_by": ["AtomicFileWriter"] },
+      { "key": "allowed_categories", "type": "array<string>", "default": ["food","transport","utilities","entertainment","health","other"], "required": true, "description": "Allowed expense categories.", "used_by": ["ExpenseValidator"] },
+      { "key": "default_currency", "type": "string", "default": "PLN", "required": true, "description": "Three-letter currency code used for default settings.", "used_by": ["ExpenseRepository","Config"] },
+      { "key": "description_max_length", "type": "int", "default": 1024, "required": true, "description": "Maximum allowed length for expense descriptions.", "used_by": ["ExpenseValidator"] },
+      { "key": "json_indent", "type": "int", "default": 2, "required": true, "description": "Number of spaces for pretty-printed JSON output.", "used_by": ["JsonSerializer"] },
+      { "key": "serializer_field_order", "type": "object", "default": {"store": ["expenses","settings"], "expense": ["id","date","amount","category","description"], "settings": ["currency"]}, "required": true, "description": "Stable field ordering for deterministic serialization.", "used_by": ["JsonSerializer"] }
+    ]
+  },
+  "dependencies": {
+    "external": [
+      { "name": "python", "version": ">=3.8", "scope": "runtime", "used_by": ["all modules"] },
+      { "name": "pytest", "version": "^7.0.0", "scope": "dev", "used_by": ["tests"] },
+      { "name": "mypy", "version": "^1.0.0", "scope": "dev", "used_by": ["development"] }
+    ],
+    "internal": [
+      { "from": "AppController", "to": "Config", "reason": "Constructs components from configuration at startup." },
+      { "from": "AppController", "to": "ExpenseRepository", "reason": "Initializes and coordinates repository initialization." },
+      { "from": "ExpenseService", "to": "ExpenseRepository", "reason": "All persistence operations delegated to repository." },
+      { "from": "ExpenseService", "to": "ExpenseValidator", "reason": "Validate domain inputs before persistence." },
+      { "from": "ExpenseRepository", "to": "JsonSerializer", "reason": "Serialize/deserialize store content." },
+      { "from": "ExpenseRepository", "to": "AtomicFileWriter", "reason": "Persist store atomically to filesystem." }
+    ]
+  },
+  "build": {
+    "commands": [
+      { "name": "format", "command": "black .", "description": "Apply code formatting (dev)." },
+      { "name": "typecheck", "command": "mypy src", "description": "Static type checking (dev)." },
+      { "name": "install-dev", "command": "pip install -r dev-requirements.txt", "description": "Install development dependencies." }
+    ]
+  },
+  "run": {
+    "entry_points": [
+      { "name": "cli", "command": "python -m cli.cli_adapter", "description": "Start CLI adapter that interacts with AppController." },
+      { "name": "service", "command": "python -m src.controller", "description": "Start AppController programmatically (used by adapters)." }
+    ]
+  },
+  "test": {
+    "strategies": ["unit","integration"],
+    "commands": [
+      { "name": "unit", "command": "pytest tests/ -k 'unit'", "description": "Run unit tests (validator, serializer)." },
+      { "name": "integration", "command": "pytest tests/ -k 'integration'", "description": "Run integration tests involving filesystem." },
+      { "name": "all", "command": "pytest tests/", "description": "Run full test suite." }
+    ],
+    "test_doubles": ["FakeDataStore","FakeMessageBus (not used)","fake filesystem for AtomicFileWriter tests"]
+  },
+  "extension_points": [
+    { "name": "IExpenseRepository", "type": "interface", "description": "Alternative persistence implementations may be provided (DB-backed) by implementing initialize_store/load_store/save_store/perform_transaction." },
+    { "name": "SerializerStrategy", "type": "abstract-class", "description": "Alternate serializers may be swapped in as long as serialize/deserialize contracts are met." },
+    { "name": "AtomicWriterStrategy", "type": "abstract-class", "description": "Platform-specific atomic writer implementations may be injected at AppController startup." }
+  ],
+  "logging": {
+    "levels": ["DEBUG","INFO","WARN","ERROR"],
+    "key_events": ["startup","store_repair","atomic_write_success","atomic_write_failure","state_transitions","validation_failures"],
+    "metrics": ["successful_writes","failed_writes","repairs_performed","validation_errors_count"]
+  },
+  "operational_notes": {
+    "default_store": { "expenses": [], "settings": { "currency": "PLN" } },
+    "serialization_order": { "store": ["expenses","settings"], "expense": ["id","date","amount","category","description"], "settings": ["currency"] },
+    "id_generation": "Deterministic monotonic integer: new_id = max(existing_ids, 0) + 1; first id = 1.",
+    "atomic_write_assumptions": "Filesystem supports atomic rename within same directory; implementation fsyncs data and directory before rename for durability.",
+    "concurrency_model": "Single-process single-writer; concurrent writers are unsupported and out-of-scope."
+  }
+}

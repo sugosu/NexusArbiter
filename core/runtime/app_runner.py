@@ -69,6 +69,8 @@ class AppRunner:
         # Extract key runtime parameters ---------------------------------
         profile_file = run_params["profile_file"]
         context_files = run_params["context_files"]
+        pretty = ", ".join(context_files) if context_files else "<none>"
+        self.logger.info(f"[AppRunner] Using context paths: {pretty}")
         target_file = run_params.get("target_file")
         provider_override = run_params.get("provider_override")
 

@@ -50,6 +50,14 @@ class RunExecutor:
             f"(attempt={attempt_number}) using profile '{profile_file}'"
         )
 
+        if context_files:
+            pretty = ", ".join(context_files)
+            self.logger.info(
+                f"[RunExecutor] Context paths: {pretty}"
+            )
+        else:
+            self.logger.info("[RunExecutor] Context paths: <none>")        
+
         # Various metadata that AppRunner may use
         run_params: Dict[str, Any] = {
             "context_files": context_files,
