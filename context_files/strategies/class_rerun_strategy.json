@@ -1,0 +1,20 @@
+{
+  "blocks": [
+    {
+      "attempts": [
+        {
+          "profile_file": "context_files/profiles/openai/class_generator.json",
+          "provider": "openai"
+        },
+        {
+          "profile_file": "context_files/profiles/openai/class_generator.json",
+          "provider": "openai"
+        },
+        {
+          "profile_file": "context_files/profiles/openai/class_refiner.json",
+          "provider": "openai"
+        }
+      ]
+    }
+  ]
+}

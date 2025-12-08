@@ -12,13 +12,23 @@ from core.runtime.pipeline_runner import PipelineRunner
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="NexusArbiter – AI Code Generation Framework")
+
     parser.add_argument(
         "--config",
         type=str,
         required=True,
-        help="Path to a JSON config file describing one or more runs.",
+        help="Path to a JSON config file describing one or more runs."
     )
+
+    parser.add_argument(
+        "--startfrom",
+        type=int,
+        default=None,
+        help="Zero-based index of the run block to start execution from."
+    )
+
     return parser.parse_args()
+
 
 
 def main() -> None:
@@ -28,7 +38,11 @@ def main() -> None:
     project_root = Path(__file__).resolve().parent
 
     config = RunConfig.from_file(args.config)
-    runner = PipelineRunner(project_root=project_root, config=config)
+    runner = PipelineRunner(
+    project_root=project_root,
+    config=config,
+    start_from=args.startfrom
+)
 
     # Run the pipeline; summary is logged inside PipelineRunner.run()
     runner.run()

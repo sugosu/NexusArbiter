@@ -22,9 +22,10 @@ class PipelineRunner:
     - Handle rerun requests via _handle_change_strategy.
     """
 
-    def __init__(self, project_root: Path, config: RunConfig):
+    def __init__(self, project_root: Path, config: RunConfig, start_from: int = 0):
         self.project_root = Path(project_root)
         self.config = config
+        self.start_from = start_from
 
         # Tracks how many times each run has been executed:
         # key = run_item.name -> attempt_number (starting at 1)
@@ -70,7 +71,23 @@ class PipelineRunner:
         index = 0
         runs: List[RunItem] = self.config.runs
 
+        # Optional: safety check
+        if self.start_from is not None and self.start_from >= len(runs):
+            self.logger.warning(
+                f"start_from={self.start_from} is beyond total runs ({len(runs)}). Nothing to execute."
+            )
+            self.logger.info("Pipeline completed.")
+            return
+
         while index < len(runs):
+            # Skip runs before start_from (if provided)
+            if self.start_from is not None and index < self.start_from:
+                self.logger.info(
+                    f"[RUN SKIPPED] index={index} < start_from={self.start_from}"
+                )
+                index += 1
+                continue
+
             run_item = runs[index]
 
             # Determine attempt number before execution
@@ -101,10 +118,8 @@ class PipelineRunner:
 
                 if rerun_applied:
                     # Do NOT increment the index
-                    # Validator will run again on next iteration
                     continue
                 else:
-                    # Strategy exhausted — proceed to next run
                     self.logger.info(
                         f"[RERUN] No further attempts left for '{run_item.name}'. Moving on."
                     )
@@ -113,6 +128,7 @@ class PipelineRunner:
             index += 1
 
         self.logger.info("Pipeline completed.")
+
 
     # ----------------------------------------------------------------------
     # Run execution wrapper

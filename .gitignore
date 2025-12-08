@@ -23,3 +23,5 @@ venv/
 *.txt
 
 /logs
+
+/tetris

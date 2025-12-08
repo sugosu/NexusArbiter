@@ -1,5 +1,5 @@
 {
-      "log_io": {
+  "log_io": {
     "enabled": true,
     "log_dir": "logs/io",
     "request_file_pattern": "{run_name}__{attempt}__request.json",
@@ -9,10 +9,31 @@
     {
       "name": "tetris_story",
       "profile_file": "context_files/profiles/openai/story_generator.json",
-      "task_description": "Generate a complete implementation story for a Tetris game.",
-      "context_file": ["context_files/general/story_example.txt","context_files/general/story_rules.json"],
+      "task_description": "Generate a complete implementation story for a tetris game.",
+      "context_file": [
+        "context_files/general/story_example.txt",
+        "context_files/general/story_rules.json"
+      ],
       "target_file": "tetris/story_tetris.txt",
       "allowed_actions": ["file_write"],
+      "retry": 0,
+      "agent_input": {}
+    },
+    {
+      "name": "story_validator",
+      "profile_file": "context_files/profiles/openai/story_validator.json",
+      "task_description": "Validate the generated implementation story against strict story rules. Write a validation report and, if needed, request a rerun that refines the story.",
+      "context_file": [
+        "tetris/story_tetris.txt",
+        "context_files/general/story_rules.json"
+      ],
+      "target_file": "tetris/story_validation.json",
+
+      "rerun_index": 0,
+      "target_run": "tetris_story",
+      "rerun_strategy": "context_files/strategies/story_rerun_strategy.json",
+
+      "allowed_actions": ["file_write", "rerun", "continue", "break"],
       "retry": 0,
       "agent_input": {}
     }
