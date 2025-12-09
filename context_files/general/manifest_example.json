@@ -2,8 +2,8 @@
   "metadata": {
     "system_name": "ExampleServicePlatform",
     "domain": "Generic Distributed Application",
-    "source_story_type": "implementation_story_v1",
-    "version": "1.0.0"
+    "source_story_type": "implementation_story_v2_architect_enhanced",
+    "version": "1.1.0"
   },
   "system_overview": {
     "purpose": "Provide a generic, modular service platform with clear separation between API layer, business logic, background processing, and persistence.",
@@ -16,12 +16,27 @@
       "Defining domain-specific business rules.",
       "Implementing a particular UI framework or frontend.",
       "Handling multi-tenant, multi-region deployment concerns."
-    ]
+    ],
+    "wiring_strategy": {
+      "description": "Explicit Manual Dependency Injection. The 'main' entrypoint is responsible for constructing the object graph in the specific order defined below.",
+      "pattern": "manual_dependency_injection",
+      "composition_root": "main.py -> ServiceHost",
+      "instantiation_order": [
+        "ServiceConfig",
+        "Logger",
+        "MetricsCollector",
+        "Repositories (DataStoreAdapter)",
+        "ApplicationServices",
+        "HttpApiHost",
+        "WorkerHost",
+        "ServiceHost"
+      ]
+    }
   },
   "environment": {
     "runtime_model": "single_process_or_multi_process",
     "execution_model": "request_response_plus_background_jobs",
-    "entrypoint": "HttpApiHost.start(ServerConfig) for synchronous calls; WorkerHost.start(WorkerConfig) for asynchronous jobs.",
+    "entrypoint": "main.py orchestrates construction; ServiceHost.start() initiates runtime.",
     "persistence": {
       "strategy": "pluggable_data_store",
       "scope": "domain_entities_and_operational_metadata"
@@ -51,63 +66,18 @@
   ],
   "state_model": {
     "states": [
-      {
-        "name": "STOPPED",
-        "description": "Service is not running; no requests or jobs are processed.",
-        "terminal": false
-      },
-      {
-        "name": "STARTING",
-        "description": "Configuration is being loaded, dependencies are being connected, health checks run.",
-        "terminal": false
-      },
-      {
-        "name": "RUNNING",
-        "description": "Service accepts requests and processes background jobs.",
-        "terminal": false
-      },
-      {
-        "name": "DEGRADED",
-        "description": "Service is running but some dependencies are impaired.",
-        "terminal": false
-      },
-      {
-        "name": "STOPPING",
-        "description": "Service is completing in-flight work and preparing to shut down.",
-        "terminal": false
-      }
+      { "name": "STOPPED", "description": "Service is not running; no requests or jobs are processed.", "terminal": false },
+      { "name": "STARTING", "description": "Configuration is being loaded, dependencies are being connected, health checks run.", "terminal": false },
+      { "name": "RUNNING", "description": "Service accepts requests and processes background jobs.", "terminal": false },
+      { "name": "DEGRADED", "description": "Service is running but some dependencies are impaired.", "terminal": false },
+      { "name": "STOPPING", "description": "Service is completing in-flight work and preparing to shut down.", "terminal": false }
     ],
     "transitions": [
-      {
-        "from": "STOPPED",
-        "to": "STARTING",
-        "trigger": "start_command",
-        "responsible_module": "ServiceHost"
-      },
-      {
-        "from": "STARTING",
-        "to": "RUNNING",
-        "trigger": "startup_checks_passed",
-        "responsible_module": "ServiceHost"
-      },
-      {
-        "from": "RUNNING",
-        "to": "DEGRADED",
-        "trigger": "dependency_health_fails",
-        "responsible_module": "HealthMonitor"
-      },
-      {
-        "from": "RUNNING",
-        "to": "STOPPING",
-        "trigger": "stop_command",
-        "responsible_module": "ServiceHost"
-      },
-      {
-        "from": "STOPPING",
-        "to": "STOPPED",
-        "trigger": "all_work_completed",
-        "responsible_module": "ServiceHost"
-      }
+      { "from": "STOPPED", "to": "STARTING", "trigger": "start_command", "responsible_module": "ServiceHost" },
+      { "from": "STARTING", "to": "RUNNING", "trigger": "startup_checks_passed", "responsible_module": "ServiceHost" },
+      { "from": "RUNNING", "to": "DEGRADED", "trigger": "dependency_health_fails", "responsible_module": "HealthMonitor" },
+      { "from": "RUNNING", "to": "STOPPING", "trigger": "stop_command", "responsible_module": "ServiceHost" },
+      { "from": "STOPPING", "to": "STOPPED", "trigger": "all_work_completed", "responsible_module": "ServiceHost" }
     ],
     "state_owner": "ServiceHost"
   },
@@ -117,20 +87,14 @@
       "layer": "infrastructure",
       "responsibilities": [
         "Own the service lifecycle state machine.",
-        "Start and stop HTTP servers, worker hosts, and shared resources.",
-        "Coordinate configuration loading and dependency wiring."
+        "Start and stop HTTP servers, worker hosts, and shared resources."
       ],
-      "non_responsibilities": [
-        "Business rule implementation.",
-        "Low-level database access."
-      ],
+      "non_responsibilities": ["Business rule implementation.", "Low-level database access."],
       "dependencies": [
-        "ConfigurationProvider",
-        "HttpApiHost",
-        "WorkerHost",
-        "HealthMonitor",
-        "Logger",
-        "MetricsCollector"
+        { "target": "ServiceConfig", "type": "config", "reason": "Loads runtime settings." },
+        { "target": "HttpApiHost", "type": "component", "reason": "Manages lifecycle of API listener." },
+        { "target": "WorkerHost", "type": "component", "reason": "Manages lifecycle of background workers." },
+        { "target": "Logger", "type": "utility", "reason": "Observability." }
       ]
     },
     {
@@ -138,16 +102,12 @@
       "layer": "interface",
       "responsibilities": [
         "Expose HTTP endpoints for synchronous request/response operations.",
-        "Route incoming requests to application services or command handlers.",
-        "Handle basic concerns like authentication/authorization if configured."
+        "Route incoming requests to application services."
       ],
-      "non_responsibilities": [
-        "Implementing business logic itself.",
-        "Persisting data directly; must call repositories or application services."
-      ],
+      "non_responsibilities": ["Implementing business logic.", "Persisting data directly."],
       "dependencies": [
-        "ApplicationServices",
-        "Logger"
+        { "target": "ApplicationServices", "type": "component", "reason": "Delegates domain logic execution." },
+        { "target": "Logger", "type": "utility", "reason": "Request logging." }
       ]
     },
     {
@@ -155,17 +115,13 @@
       "layer": "infrastructure",
       "responsibilities": [
         "Poll queues or schedules and dispatch background jobs.",
-        "Control concurrency for job execution.",
-        "Report job results and failures."
+        "Control concurrency for job execution."
       ],
-      "non_responsibilities": [
-        "Defining specific job semantics (handled by job handlers)."
-      ],
+      "non_responsibilities": ["Defining specific job semantics."],
       "dependencies": [
-        "JobScheduler",
-        "JobHandlers",
-        "Logger",
-        "MetricsCollector"
+        { "target": "ApplicationServices", "type": "component", "reason": "Executes job logic." },
+        { "target": "Logger", "type": "utility", "reason": "Job logging." },
+        { "target": "MetricsCollector", "type": "utility", "reason": "Throughput tracking." }
       ]
     },
     {
@@ -175,14 +131,10 @@
         "Implement use cases and orchestrate domain operations.",
         "Apply domain rules and invariants."
       ],
-      "non_responsibilities": [
-        "Direct HTTP or transport concerns.",
-        "Direct SQL or driver-level persistence."
-      ],
+      "non_responsibilities": ["Direct HTTP concerns.", "SQL generation."],
       "dependencies": [
-        "DomainModel",
-        "Repositories",
-        "ExternalServiceClients"
+        { "target": "Repositories", "type": "component", "reason": "Data access." },
+        { "target": "ExternalServiceClients", "type": "component", "reason": "Upstream API calls." }
       ]
     }
   ],
@@ -195,38 +147,35 @@
         "Control the lifecycle of the service process.",
         "Coordinate startup, health checks, and graceful shutdown."
       ],
+      "construction": {
+        "type": "injection",
+        "description": "Orchestrator injected with fully constructed hosts.",
+        "args": [
+          { "name": "config", "type": "ServiceConfig", "source": "instance" },
+          { "name": "http_host", "type": "HttpApiHost", "source": "instance" },
+          { "name": "worker_host", "type": "WorkerHost", "source": "instance" },
+          { "name": "logger", "type": "Logger", "source": "instance" }
+        ]
+      },
       "attributes": [
-        { "name": "config", "type": "ServiceConfig", "description": "Immutable configuration for this service instance." },
-        { "name": "state", "type": "ServiceState", "description": "Current lifecycle state of the service." },
-        { "name": "http_host", "type": "HttpApiHost", "description": "HTTP interface host." },
-        { "name": "worker_host", "type": "WorkerHost", "description": "Background worker host." }
+        { "name": "state", "type": "ServiceState", "description": "Current lifecycle state of the service." }
       ],
       "methods": [
         {
           "name": "start",
-          "purpose": "Initialize dependencies, start HTTP/worker hosts, and transition to RUNNING when healthy.",
+          "purpose": "Initialize dependencies, start HTTP/worker hosts, and transition to RUNNING.",
           "parameters": [],
           "returns": { "type": "void" },
-          "side_effects": [
-            "Changes service state.",
-            "Starts HTTP listener and worker polling."
-          ],
-          "errors": [
-            "InitializationError if mandatory dependencies cannot be initialized."
-          ]
+          "side_effects": ["Changes service state.", "Starts listeners."],
+          "errors": ["InitializationError"]
         },
         {
           "name": "stop",
-          "purpose": "Trigger graceful shutdown of HTTP and worker hosts, and transition to STOPPED.",
+          "purpose": "Trigger graceful shutdown and transition to STOPPED.",
           "parameters": [],
           "returns": { "type": "void" },
-          "side_effects": [
-            "Stops accepting new requests.",
-            "Waits for in-flight work to complete or times out."
-          ],
-          "errors": [
-            "ShutdownError if resources cannot be shut down cleanly."
-          ]
+          "side_effects": ["Stops accepting requests."],
+          "errors": ["ShutdownError"]
         }
       ]
     },
@@ -236,11 +185,19 @@
       "kind": "class",
       "responsibilities": [
         "Bind and listen on configured HTTP ports.",
-        "Translate HTTP requests into application-level commands or queries."
+        "Translate HTTP requests into application-level commands."
       ],
+      "construction": {
+        "type": "injection",
+        "description": "Must receive the service layer to route requests to.",
+        "args": [
+          { "name": "config", "type": "ServiceConfig", "source": "instance" },
+          { "name": "application_services", "type": "ApplicationServices", "source": "instance" },
+          { "name": "logger", "type": "Logger", "source": "instance" }
+        ]
+      },
       "attributes": [
-        { "name": "routes", "type": "list<RouteDefinition>", "description": "Registered API routes and handlers." },
-        { "name": "server_config", "type": "ServerConfig", "description": "Host and port configuration." }
+        { "name": "routes", "type": "list<RouteDefinition>", "description": "Registered API routes." }
       ],
       "methods": [
         {
@@ -248,21 +205,54 @@
           "purpose": "Begin listening for incoming HTTP requests.",
           "parameters": [],
           "returns": { "type": "void" },
-          "side_effects": [
-            "Opens listening sockets.",
-            "Starts request handling loop."
-          ],
-          "errors": [
-            "NetworkError if ports are unavailable."
-          ]
+          "errors": ["NetworkError"]
         }
+      ]
+    },
+    {
+      "name": "WorkerHost",
+      "module": "WorkerHost",
+      "kind": "class",
+      "responsibilities": [
+         "Manage background job polling and execution."
+      ],
+      "construction": {
+        "type": "injection",
+        "args": [
+          { "name": "config", "type": "ServiceConfig", "source": "instance" },
+          { "name": "application_services", "type": "ApplicationServices", "source": "instance" },
+           { "name": "metrics", "type": "MetricsCollector", "source": "instance" }
+        ]
+      },
+      "methods": [
+        { "name": "start", "purpose": "Start job polling.", "parameters": [], "returns": { "type": "void" }, "errors": [] }
+      ]
+    },
+    {
+      "name": "ApplicationServices",
+      "module": "ApplicationServices",
+      "kind": "class",
+      "responsibilities": [
+        "Execute business logic independent of transport."
+      ],
+      "construction": {
+        "type": "injection",
+        "description": "Requires persistence adapter to function.",
+        "args": [
+          { "name": "repositories", "type": "Repositories", "source": "instance" }
+        ]
+      },
+      "methods": [
+        { "name": "execute_use_case", "purpose": "Generic handler.", "parameters": ["command: Command"], "returns": { "type": "Result" }, "errors": [] }
       ]
     }
   ],
   "data_structures": [
     {
       "name": "ServiceConfig",
-      "kind": "data_type",
+      "kind": "dataclass",
+      "python_type_hint": "config.ServiceConfig",
+      "serialization_behavior": "object_to_dict",
       "description": "Top-level configuration for the service process.",
       "fields": [
         { "name": "service_name", "type": "string" },
@@ -279,7 +269,8 @@
     },
     {
       "name": "RouteDefinition",
-      "kind": "data_type",
+      "kind": "dataclass",
+      "python_type_hint": "http.RouteDefinition",
       "description": "Describes a single HTTP route and its handler.",
       "fields": [
         { "name": "method", "type": "string" },
@@ -294,32 +285,24 @@
       {
         "name": "service_name",
         "type": "string",
-        "description": "Logical name of the service.",
-        "constraints": "non_empty",
         "default": "example-service",
         "consumed_by": ["ServiceHost", "Logger"]
       },
       {
         "name": "environment",
         "type": "string",
-        "description": "Deployment environment label.",
-        "constraints": "e.g., dev, test, prod",
         "default": "dev",
         "consumed_by": ["ServiceHost", "MetricsCollector"]
       },
       {
         "name": "http_port",
         "type": "int",
-        "description": "Port number for HTTP listener.",
-        "constraints": "1..65535",
         "default": 8080,
         "consumed_by": ["HttpApiHost"]
       },
       {
         "name": "worker_concurrency",
         "type": "int",
-        "description": "Maximum number of concurrent background jobs.",
-        "constraints": ">= 1",
         "default": 4,
         "consumed_by": ["WorkerHost"]
       }
@@ -329,81 +312,38 @@
     "uses_randomness": true,
     "rng_owner_module": "ApplicationServices",
     "rng_class": "RandomProvider",
-    "seeding_policy": "Seeds may be configured explicitly in ServiceConfig or derived from system time. Deterministic behavior is expected when an explicit seed is provided.",
-    "consumers": [
-      "IdGenerators",
-      "SamplingOrBackoffLogic"
-    ]
+    "seeding_policy": "Seeds may be configured explicitly in ServiceConfig or derived from system time."
   },
   "error_handling": {
-    "global_policy": "Configuration and initialization errors abort startup; runtime errors are logged and either surfaced to clients or handled with retries based on module policy.",
-    "error_types": [
-      "InitializationError",
-      "ConfigurationError",
-      "NetworkError",
-      "PersistenceError",
-      "JobExecutionError"
-    ],
-    "recoverable_errors": [
-      "Transient network failures for outgoing calls.",
-      "Database timeouts when retry policy is enabled."
-    ],
-    "fatal_errors": [
-      "Invalid critical configuration at startup.",
-      "Persistent failure of core dependencies that prevents safe operation."
-    ]
+    "global_policy": "Configuration and initialization errors abort startup.",
+    "error_types": ["InitializationError", "ConfigurationError", "NetworkError", "PersistenceError"],
+    "recoverable_errors": ["Transient network failures"],
+    "fatal_errors": ["Invalid critical configuration"]
   },
   "logging": {
     "levels": ["DEBUG", "INFO", "WARN", "ERROR"],
-    "key_events_logged": [
-      "Service start and stop.",
-      "Health check failures and recoveries.",
-      "Unexpected exceptions in request or job handlers."
-    ],
-    "metrics": [
-      "request_latency_ms",
-      "request_rate",
-      "job_throughput",
-      "error_rate"
-    ]
+    "key_events_logged": ["Service start/stop", "Health failures"],
+    "metrics": ["request_latency_ms", "request_rate", "job_throughput", "error_rate"]
   },
   "performance": {
     "target_latency_ms_p95": 200,
     "target_throughput_rps": 100,
-    "critical_paths": [
-      "Database interactions in request handlers.",
-      "External API calls.",
-      "Job execution under peak load."
-    ]
+    "critical_paths": ["Database interactions"]
   },
   "extension_points": [
     {
       "name": "DataStoreAdapter",
-      "description": "Pluggable persistence implementation (SQL, NoSQL, in-memory, etc.).",
-      "registration": "Provided to ApplicationServices or Repositories during startup."
+      "description": "Pluggable persistence implementation.",
+      "registration": "Provided to Repositories during startup."
     },
     {
       "name": "MessageBusAdapter",
-      "description": "Pluggable message queue or event bus integration.",
-      "registration": "Injected into WorkerHost and ApplicationServices."
+      "description": "Pluggable message queue integration.",
+      "registration": "Injected into WorkerHost."
     }
   ],
   "testing": {
-    "strategy": "Unit tests for domain and application services, integration tests for HTTP endpoints and background jobs using fake adapters.",
-    "unit_test_targets": [
-      "ApplicationServices",
-      "Repositories",
-      "JobHandlers"
-    ],
-    "integration_test_scenarios": [
-      "HTTP request flows using in-memory HTTP host and fake datastore.",
-      "Background job execution with in-memory queues.",
-      "Error and retry behavior for external dependencies."
-    ],
-    "test_doubles": [
-      "FakeDataStore",
-      "FakeMessageBus",
-      "FakeExternalServiceClient"
-    ]
+    "strategy": "Unit tests for domain, integration for HTTP.",
+    "test_doubles": ["FakeDataStore", "FakeMessageBus"]
   }
 }

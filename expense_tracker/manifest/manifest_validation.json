@@ -1,1 +1,20 @@
-{"is_valid":true,"errors":[{"code":"METADATA_KEYS_MISMATCH","path":"metadata","message":"Metadata keys diverge from the manifest example/schema. Example expects keys like 'system_name', 'domain', 'source_story_type' while this manifest uses 'name','description','language','source_story'. The information is present but consider aligning key names or providing a mapping for downstream tools.","severity":"warning"},{"code":"PERSISTENCE_SCHEMA_MISMATCH","path":"environment.persistence","message":"'environment.persistence' is a string ('single_file_json') in this manifest but the example uses an object describing strategy and scope (e.g., {\"strategy\":..., \"scope\":...}). Consider using the object form or documenting the mapping so downstream generators can rely on structured persistence metadata.","severity":"warning"},{"code":"CONFIG_SECTION_NAMING","path":"configuration","message":"Configuration section is named 'configuration' with a 'parameters' array. The example uses 'config' with 'fields'. The parameter content appears complete, but renaming or providing a compatibility mapping will help tools expecting the example schema.","severity":"warning"}],"summary":"Manifest is valid JSON and actionable for generation, but contains 3 schema-alignment warnings (metadata keys, persistence shape, configuration section naming)."}
+{
+  "class_name": "AppController",
+  "overall_quality": "good",
+  "summary": "AppController implementation follows the manifest/story requirements and wiring strategy, constructs components in the expected order, supports constructor injection for test doubles, initializes the repository, and manages lifecycle state transitions. No functional correctness issues were detected in the code shown.",
+  "issues": [
+    {
+      "id": "FILE_LOCATION_MISMATCH",
+      "severity": "minor",
+      "message": "The implementation file is located at 'expense_tracker/src/controller.py' but the manifest lists the AppController component in 'main.py'. This is a packaging/placement mismatch between manifest and source layout.",
+      "location": "expense_tracker/src/controller.py",
+      "related_spec": "manifest.files -> component 'AppController' expected in 'main.py'"
+    }
+  ],
+  "recommendations": [
+    "Rename or move the source file to match the manifest entry (main.py) or update the manifest to point to controller.py so tooling and packaging remain consistent.",
+    "Ensure project entrypoints and packaging (e.g., setup.cfg/pyproject) reference the actual module path used at build/runtime (AppController location).",
+    "Optionally add a brief unit/integration test for AppController.start() verifying that repository.initialize_store() is called and the state transitions to READY on success and to ERROR on unrecoverable IO exceptions."
+  ],
+  "rerun_recommended": false
+}

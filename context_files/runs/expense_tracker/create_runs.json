@@ -1,0 +1,23 @@
+{
+  "log_io": {
+    "enabled": true,
+    "log_dir": "logs/io",
+    "request_file_pattern": "{run_name}__{attempt}__request.json",
+    "response_file_pattern": "{run_name}__{attempt}__response.json"
+  },
+  "runs": [
+    {
+      "name": "run_from_manifest_generator",
+      "profile_file": "context_files/profiles/openai/run_from_manifest_generator.json",
+      "task_description": "Generate runs json from provided examples and manifest, do it for every single .py object in the manifest file.",
+      "context_file": [
+        "expense_tracker/runs/expense_class.json",
+        "expense_tracker/manifest/manifest.json"
+      ],
+      "target_file": "expense_tracker/run/all_classes_runs.json",
+      "allowed_actions": ["file_write"],
+      "retry": 0,
+      "agent_input": {}
+    }
+  ]
+}

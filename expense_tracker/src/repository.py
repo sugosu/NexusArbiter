@@ -1,44 +1,148 @@
-{
-  "class_name": "ExpenseRepository",
-  "overall_quality": "good",
-  "summary": "Implementation largely conforms to the manifest and story: the required public methods exist, structural validation and atomic persist are implemented, and initialization behavior covers common corruption cases. A few issues were found that should be fixed to improve robustness (race condition during initialization), tighten structural checks (id uniqueness/non-negativity), and reduce overly broad exception handling).",
-  "issues": [
-    {
-      "id": "INITIALIZE_MISSING_FILE_RACE",
-      "severity": "major",
-      "message": "initialize_store uses os.path.exists() then calls load_store(); if the file is removed between these calls a FileNotFoundError (subclass of OSError) will be raised and treated as an unrecoverable filesystem error. The method should treat a missing file discovered at load time as a recoverable case and create the default store instead of failing.",
-      "location": "ExpenseRepository.initialize_store",
-      "related_spec": "story: 'On startup, if the file does not exist or is invalid, create/reset to a safe default structure.'; manifest: initialize_store should create default when missing."
-    },
-    {
-      "id": "ID_UNIQUENESS_AND_NON_NEGATIVE_NOT_ENFORCED",
-      "severity": "minor",
-      "message": "The repository's structural validator checks types of 'id' but does not enforce that ids are unique or non-negative. The system specification requires id uniqueness and non-negative integer ids as invariants. Either enforce this in _validate_structure or document and ensure the service layer always enforces this invariant before persisting.",
-      "location": "ExpenseRepository._validate_structure",
-      "related_spec": "story: 'id must be unique among expenses and non-negative integer'; manifest data_structures and operational_notes."
-    },
-    {
-      "id": "BROAD_EXCEPTION_HANDLING",
-      "severity": "minor",
-      "message": "Several places catch Exception (e.g., when writing default store or during serialization) which can mask programming errors. Prefer catching specific exceptions (OSError, serializer-specific errors) and re-raising or wrapping with repository-level error types to preserve intent and visibility.",
-      "location": "ExpenseRepository._persist_store, ExpenseRepository.initialize_store",
-      "related_spec": "manifest logging & error handling: distinguish recoverable vs fatal errors and propagate IO errors as IOError/OSError."
-    },
-    {
-      "id": "UNUSED_LOCAL_EXCEPTION_CLASS",
-      "severity": "minor",
-      "message": "NotFoundError is defined in the module but not used by the repository. Consider removing unused exception definitions or using them when the repository semantics include not-found conditions (currently service layer handles NotFound conditions).",
-      "location": "module scope (NotFoundError) in src/repository.py",
-      "related_spec": "manifest: NotFoundError expected in domain flow; but repository currently doesn't raise it."
-    }
-  ],
-  "recommendations": [
-    "In initialize_store: explicitly handle FileNotFoundError or catch exceptions from load_store and if the cause is 'file missing', treat it as 'missing file' and create & persist the default store (same behavior as the pre-exists branch). This avoids a race turning into an unrecoverable initialization failure.",
-    "Enhance _validate_structure to assert id uniqueness and non-negativity (e.g., collect ids and check that all are ints >= 0 and that len(set(ids)) == len(ids)). If you prefer keeping domain constraints in service/validator, add clear docstring/comments and unit tests to ensure callers enforce uniqueness before persisting.",
-    "Replace broad 'except Exception' catches with narrower exception handling: catch serialization-specific exceptions and OSError where appropriate, log contextual information, and re-raise repository-level exceptions (ParseError/StructureError/IOError) to callers. This improves debuggability and prevents masking non-IO bugs.",
-    "Remove or use the declared NotFoundError or add a comment explaining why it is defined in this module (keeps codebase clean).",
-    "Add unit/integration tests that simulate the 'file removed between exists() and open()' race during initialize_store, and tests asserting id uniqueness/non-negative enforcement or documented responsibility between service and repository.",
-    "Consider adding small helper methods or documentation that clarify where deterministic id assignment is intended to occur (service vs repository). If repository is intended to help with id assignment, add a helper method or document the expected modifier behavior for perform_transaction."
-  ],
-  "rerun_recommended": false
-}
+import os
+import logging
+from typing import Callable
+
+from models import ExpenseStore, Settings
+import errors
+
+# ExpenseRepository: responsible for all filesystem interactions for the ExpenseStore.
+# - Loads and deserializes store using provided serializer
+# - Repairs missing/corrupt stores to a safe default on initialize_store()
+# - Persists stores atomically using provided writer
+# Notes: If other modules are missing in the runtime, tests wiring should provide them.
+
+logger = logging.getLogger(__name__)
+
+
+class ExpenseRepository:
+    """Repository that encapsulates filesystem access for the single-file ExpenseStore.
+
+    Constructor requires a config-like object exposing `store_path` and `default_currency`,
+    a serializer implementing serialize/deserialize, and an atomic writer implementing
+    atomic_write(path, content).
+    """
+
+    def __init__(self, config, serializer, writer) -> None:
+        self._config = config
+        self._path: str = config.store_path
+        self._serializer = serializer
+        self._writer = writer
+
+    def initialize_store(self) -> ExpenseStore:
+        """Ensure the store file exists and is structurally valid.
+
+        If the file is missing, create a default safe store and persist it.
+        If the file exists but is syntactically invalid or structurally mismatched,
+        replace it with the default safe store and return that.
+
+        Raises IOError for unrecoverable filesystem errors.
+        """
+        try:
+            if not os.path.exists(self._path):
+                logger.info("Store file missing: creating default store at %s", self._path)
+                default = self._default_store()
+                self.save_store(default)
+                logger.info("Default store written to %s", self._path)
+                return default
+
+            # File exists: attempt to read and deserialize
+            try:
+                store = self.load_store()
+                return store
+            except (errors.ParseError, errors.StructureError) as e:
+                # Recoverable on startup: replace with default
+                logger.warning("Store at %s is invalid (%s). Replacing with default store.", self._path, e)
+                default = self._default_store()
+                self.save_store(default)
+                logger.info("Repaired store written to %s", self._path)
+                return default
+
+        except OSError as e:
+            logger.error("Filesystem error during initialize_store for %s: %s", self._path, e)
+            # Propagate as IO error
+            raise
+
+    def load_store(self) -> ExpenseStore:
+        """Read the persistent store from disk and deserialize it.
+
+        Returns the ExpenseStore on success.
+        Raises errors.ParseError / errors.StructureError for invalid content,
+        or OSError for I/O errors.
+        """
+        try:
+            with open(self._path, "r", encoding="utf-8") as f:
+                raw = f.read()
+        except OSError:
+            # Propagate to caller
+            logger.exception("Failed to open store file for reading: %s", self._path)
+            raise
+
+        # Delegate parsing/structure checks to serializer
+        store = self._serializer.deserialize(raw)
+        return store
+
+    def save_store(self, store: ExpenseStore) -> None:
+        """Serialize the provided store and atomically replace the persistent file.
+
+        Raises OSError on filesystem failures propagated from atomic writer.
+        """
+        # Serialize first to ensure the store is structurally serializable
+        content = self._serializer.serialize(store)
+
+        # Ensure parent directory exists
+        self._ensure_parent_dir()
+
+        try:
+            self._writer.atomic_write(self._path, content)
+            logger.info("Atomic write successful to %s", self._path)
+        except OSError:
+            logger.exception("Atomic write failed for %s", self._path)
+            raise
+
+    def perform_transaction(self, modifier: Callable[[ExpenseStore], ExpenseStore]) -> ExpenseStore:
+        """Read-modify-write primitive.
+
+        Loads the current store, calls modifier(store) to obtain a new store,
+        performs a structural check by attempting to serialize the result, then
+        atomically writes it and returns the saved store.
+
+        Errors from modifier propagate. Raises errors.ValidationError if the
+        modifier result cannot be serialized/has invalid structure as detected
+        by the serializer. Raises OSError for filesystem failures.
+        """
+        # Load current store (may raise ParseError/StructureError/OSError to caller)
+        current = self.load_store()
+
+        # Call modifier to obtain new store. Modifier is expected to be a pure function.
+        new_store = modifier(current)
+
+        # Structural validation: attempt to serialize (serializer may raise StructureError)
+        try:
+            # serializer.serialize may raise StructureError if shape is not as expected
+            _ = self._serializer.serialize(new_store)
+        except errors.StructureError as e:
+            logger.warning("Transaction produced structurally invalid store: %s", e)
+            # Wrap or re-raise as ValidationError per contract
+            raise errors.ValidationError(f"modifier returned structurally invalid store: {e}")
+
+        # Persist atomically
+        self.save_store(new_store)
+        return new_store
+
+    def _default_store(self) -> ExpenseStore:
+        """Construct the canonical default safe ExpenseStore.
+
+        Default: expenses = [], settings = { currency: config.default_currency }
+        """
+        settings = Settings(currency=self._config.default_currency)
+        return ExpenseStore(expenses=[], settings=settings)
+
+    def _ensure_parent_dir(self) -> None:
+        dirpath = os.path.dirname(self._path)
+        if not dirpath:
+            return
+        try:
+            os.makedirs(dirpath, exist_ok=True)
+        except OSError:
+            logger.exception("Failed to ensure parent directory exists: %s", dirpath)
+            raise
