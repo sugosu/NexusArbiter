@@ -1,20 +1,52 @@
 {
-  "class_name": "AppController",
-  "overall_quality": "good",
-  "summary": "AppController implementation follows the manifest/story requirements and wiring strategy, constructs components in the expected order, supports constructor injection for test doubles, initializes the repository, and manages lifecycle state transitions. No functional correctness issues were detected in the code shown.",
+  "class_name": "models.Settings",
+  "overall_quality": "poor",
+  "summary": "Settings dataclass exists but the models module is incomplete and contains erroneous/self-referential imports that will break import and runtime behavior.",
   "issues": [
     {
-      "id": "FILE_LOCATION_MISMATCH",
+      "id": "MISSING_CLASSES",
+      "severity": "critical",
+      "message": "src/models.py does not define the required model types declared in the manifest: Expense, ExpenseStore, and ServiceState enum.",
+      "location": "src/models.py",
+      "related_spec": "manifest.modules -> Models components (Expense, Settings, ExpenseStore, ServiceState)"
+    },
+    {
+      "id": "INVALID_IMPORTS",
+      "severity": "major",
+      "message": "Top-of-file imports bring in application components (AppController, AtomicFileWriter, ExpenseRepository, etc.). models.py should be a pure domain types module with only standard-library/type imports; these imports create tight coupling and likely circular dependencies.",
+      "location": "top of src/models.py (import section)",
+      "related_spec": "story: Modules & Responsibilities - Models must not include IO or dependency on other modules"
+    },
+    {
+      "id": "SELF_IMPORT",
+      "severity": "major",
+      "message": "The file imports from 'models' (e.g. 'from models import Expense') before defining those names. This is a self-import and will cause ImportError/NameError or circular import issues at runtime.",
+      "location": "lines with 'from models import ...'",
+      "related_spec": "project import structure / Python module rules"
+    },
+    {
+      "id": "PARTIAL_IMPLEMENTATION",
+      "severity": "major",
+      "message": "Only Settings is implemented in this module but the manifest expects multiple dataclasses and an enum in the same file. The module as provided does not satisfy the manifest contract.",
+      "location": "src/models.py",
+      "related_spec": "manifest.data_structures and manifest.modules -> Models"
+    },
+    {
+      "id": "SETTINGS_FROM_DICT_DEFAULT_BEHAVIOR",
       "severity": "minor",
-      "message": "The implementation file is located at 'expense_tracker/src/controller.py' but the manifest lists the AppController component in 'main.py'. This is a packaging/placement mismatch between manifest and source layout.",
-      "location": "expense_tracker/src/controller.py",
-      "related_spec": "manifest.files -> component 'AppController' expected in 'main.py'"
+      "message": "Settings.from_dict currently substitutes an empty string when currency is missing. The story specifies a default_currency in Config and repository initialization should ensure the safe default store; consider documenting this choice or accepting a configurable default here.",
+      "location": "Settings.from_dict",
+      "related_spec": "story: Default safe structure & Config.default_currency"
     }
   ],
   "recommendations": [
-    "Rename or move the source file to match the manifest entry (main.py) or update the manifest to point to controller.py so tooling and packaging remain consistent.",
-    "Ensure project entrypoints and packaging (e.g., setup.cfg/pyproject) reference the actual module path used at build/runtime (AppController location).",
-    "Optionally add a brief unit/integration test for AppController.start() verifying that repository.initialize_store() is called and the state transitions to READY on success and to ERROR on unrecoverable IO exceptions."
+    "Remove all non-essential imports from src/models.py. The models module should not import application components (AppController, AtomicFileWriter, ExpenseRepository, etc.). Keep only standard-library imports (dataclasses, typing, enum) and type-only imports guarded by typing.TYPE_CHECKING if necessary.
+",
+    "Implement the missing types in src/models.py exactly as required by the manifest: dataclass Expense (fields: id:int, date:str, amount:decimal or number, category:str, description:Optional[str]), dataclass ExpenseStore (fields: expenses:list[Expense], settings:Settings), and enum ServiceState with values [INIT, READY, ERROR, SHUTDOWN].",
+    "Provide to_dict and from_dict (or similar serialization helpers) for Expense and ExpenseStore that perform safe, best-effort construction from plain mappings; ensure optional 'description' handling (omit or None allowed). Keep domain parsing in models lightweight; full validation belongs to ExpenseValidator.",
+    "Eliminate self-imports (e.g., 'from models import ...') within src/models.py. Other modules should import models, not the reverse. If forward references are needed for typing, use "\"quoted\"" forward references or typing.TYPE_CHECKING guards.",
+    "Decide and document the Settings.from_dict behavior: either accept an explicit default parameter or return None/empty and let repository initialize default store using Config.default_currency. Make behavior explicit in docstring and align with repository initialization policy.",
+    "Add unit tests that import only the models module to verify it can be imported without importing other application components (this will catch circular import problems early)."
   ],
-  "rerun_recommended": false
+  "rerun_recommended": true
 }

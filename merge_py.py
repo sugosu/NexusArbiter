@@ -6,7 +6,7 @@ OUTPUT_NAME = "merged_all.txt"
 LICENSE_NAME = "LICENSE"   # included explicitly
 
 # <<< SET THIS TO YOUR GENERATED PROJECT ROOT (relative or absolute) >>>
-DEFAULT_ROOT_DIR = "./expense_tracker"  # e.g. "expense_tracker" or "/full/path/to/expense_tracker"
+DEFAULT_ROOT_DIR = "./expense_tracker_v2"  # e.g. "expense_tracker" or "/full/path/to/expense_tracker"
 
 
 def collect_all_files(root_dir: str, output_name: str) -> list[str]:

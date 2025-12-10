@@ -7,14 +7,14 @@
   },
   "runs": [
     {
-      "name": "run_from_manifest_generator",
+      "name": "AtomicFileWriter_generator",
       "profile_file": "context_files/profiles/openai/run_from_manifest_generator.json",
-      "task_description": "Generate runs json from provided examples and manifest, do it for every single .py object in the manifest file.",
+      "task_description": "Generate runs from the provided manifest file for every single PY object, the example is also included.",
       "context_file": [
-        "expense_tracker/manifest/manifest.json",
-        "context_files/runs/expense_tracker/expense_class.json"
+        "context_files/runs/expense_tracker/expense_class.json",
+        "expense_tracker/manifest/manifest.json"
       ],
-      "target_file": "expense_tracker/run/all_classes_runs.json",
+      "target_file": "expense_tracker/runs/all_classes_runs.json",
       "allowed_actions": ["file_write"],
       "retry": 0,
       "agent_input": {}

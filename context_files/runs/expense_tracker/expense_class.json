@@ -12,7 +12,8 @@
       "task_description": "Generate the Python implementation of the ExpenseRepository class as described by the expense tracker implementation story and manifest.",
       "context_file": [
         "expense_tracker/story_expense_tracker.txt",
-        "expense_tracker/manifest/manifest.json"
+        "expense_tracker/manifest/manifest.json",
+        "expense_tracker/headers/class_imports.txt"        
       ],
       "target_file": "expense_tracker/src/repository.py",
       "allowed_actions": ["file_write"],
@@ -27,7 +28,8 @@
         "expense_tracker/story_expense_tracker.txt",
         "expense_tracker/manifest/manifest.json",
         "expense_tracker/src/repository.py",
-        "context_files/general/class_generation_rules.json"
+        "context_files/general/class_generation_rules.json",
+        "expense_tracker/headers/class_imports.txt"
       ],
       "target_file": "expense_tracker/manifest/manifest_validation.json",
       "rerun_index": 0,

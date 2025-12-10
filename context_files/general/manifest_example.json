@@ -44,6 +44,24 @@
     "ui_mode": "external_client_or_frontend",
     "headless_support": true
   },
+
+  "runtime": {
+    "entrypoint": {
+      "module": "service_host",
+      "class": "ServiceHost",
+      "init_params": {
+        "config": {
+          "service_name": "example-service",
+          "environment": "dev",
+          "http_port": 8080,
+          "worker_concurrency": 4
+        }
+      },
+      "run_method": "start",
+      "run_args": {}
+    }
+  },
+
   "actors": [
     {
       "name": "ClientApplication",
@@ -179,6 +197,7 @@
         }
       ]
     },
+
     {
       "name": "HttpApiHost",
       "module": "HttpApiHost",
@@ -209,25 +228,27 @@
         }
       ]
     },
+
     {
       "name": "WorkerHost",
       "module": "WorkerHost",
       "kind": "class",
       "responsibilities": [
-         "Manage background job polling and execution."
+        "Manage background job polling and execution."
       ],
       "construction": {
         "type": "injection",
         "args": [
           { "name": "config", "type": "ServiceConfig", "source": "instance" },
           { "name": "application_services", "type": "ApplicationServices", "source": "instance" },
-           { "name": "metrics", "type": "MetricsCollector", "source": "instance" }
+          { "name": "metrics", "type": "MetricsCollector", "source": "instance" }
         ]
       },
       "methods": [
         { "name": "start", "purpose": "Start job polling.", "parameters": [], "returns": { "type": "void" }, "errors": [] }
       ]
     },
+
     {
       "name": "ApplicationServices",
       "module": "ApplicationServices",
@@ -243,7 +264,13 @@
         ]
       },
       "methods": [
-        { "name": "execute_use_case", "purpose": "Generic handler.", "parameters": ["command: Command"], "returns": { "type": "Result" }, "errors": [] }
+        { 
+          "name": "execute_use_case",
+          "purpose": "Generic handler.",
+          "parameters": ["command: Command"],
+          "returns": { "type": "Result" },
+          "errors": []
+        }
       ]
     }
   ],

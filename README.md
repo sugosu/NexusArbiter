@@ -12,19 +12,21 @@ NexusArbiter focuses on:
 
 ------------------------------------------------------------
 
+## Who is this for?
+
+• AI engineers building deterministic generation flows  
+• Backend/infra engineers automating code creation  
+• Researchers needing reproducible LLM behavior  
+• Teams enforcing strict JSON control and validation  
+
+
 ## Key Features
 
 ### Multi-provider AI Execution
 You can run OpenAI, Gemini, or custom providers in a single pipeline.  
-Provider selection may occur in:
-
-• profiles  
-• run configuration  
-• strategy-level rerun overrides  
 
 ### Deterministic Action Contract
-Models must return a structured JSON response with an agent.actions array.
-This ensures predictable behavior and eliminates ambiguity during execution.
+Models must return a structured JSON response with an agent.
 
 ### Strategy-Based Reruns
 Validators can request reruns of earlier steps.  
@@ -35,15 +37,14 @@ Strategies define:
 • alternative providers  
 • alternative context files  
 
-Once attempts are exhausted, the validator continues execution.
-
 ### System Retry Policy
 Retry logic handles:
 
-• timeouts  
+• Request timeouts  
 • 429 (rate limit)  
 • 5xx server errors  
 • network errors  
+• Invalid Agent responses  
 
 Configured globally in runs.json.
 
@@ -125,7 +126,7 @@ Execution then returns to the validator until attempts expire.
 Define:
 
 • provider and model  
-• temperature, top_p, max_tokens  
+• temperature, top_p, max_tokens, model specific parameters  
 • system and user templates  
 • placeholders such as task_description, agent_input, rules_block, context_block  
 
@@ -142,36 +143,11 @@ Define deterministic rerun behavior via blocks and attempts, enabling correction
 
 ------------------------------------------------------------
 
-## Testing
-
-The framework includes tests for:
-
-• file_write, continue, break, rerun actions  
-• strategy loading  
-• rerun control flow  
-• registry correctness  
-• provider behavior stubs  
-
-Additional integration tests can be added for full pipelines.
-
-------------------------------------------------------------
-
-## Roadmap
-
-Future enhancements include:
-
-• structured per-attempt logs  
-• parallel execution engine  
-• expanded provider compatibility  
-• CLI tooling  
-• visual pipeline debugger  
-• browser UI for traces  
-• plugin system for custom actions  
-• curated example pipelines (e.g., full project generators)
-
-------------------------------------------------------------
-
 ## License
 
 This project is licensed under the MIT License.
 See the LICENSE file for details.
+
+## Contact
+
+onatgegeoglu@gmail.com
