@@ -21,6 +21,8 @@ venv/
 .merged_all.txt
 
 *.txt
+/context_files
+/context_files_legacy
 
 /logs
 

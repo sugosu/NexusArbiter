@@ -1,9 +1,0 @@
-{
-  "project_name": "NexusArbiter",
-  "rules": [
-    "All source files must be placed under the 'core' or 'app' packages.",
-    "Logging must use the project-wide logger from 'core.logging.logger'.",
-    "Configuration must be read via 'core.config.run_config.RunConfig'.",
-    "Public APIs must not hard-code file system paths; use helpers from 'core.files.path_utils'."
-  ]
-}

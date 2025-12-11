@@ -216,7 +216,25 @@ class PipelineRunner:
             return False
 
         # Load strategy
-        strategy = RerunStrategy.from_file(strategy_file)
+        strategy_file = Path(validator_run_item.rerun_strategy)
+        if not strategy_file.exists():
+            self.logger.error(
+                f"[RERUN] Strategy file does not exist: {strategy_file}"
+            )
+            return False
+
+        target_name = validator_run_item.target_run
+
+        if target_name:
+            # New: index-aware loading (select by target_run)
+            strategy = RerunStrategy.from_file_for_target(
+                strategy_file,
+                target_run=target_name,
+            )
+        else:
+            # Fallback: legacy behaviour (file has direct "blocks" or "strategy")
+            strategy = RerunStrategy.from_file(strategy_file)
+
         blocks = strategy.blocks
 
         idx = validator_run_item.rerun_index
