@@ -1,6 +1,5 @@
 # core/strategy/rerun_strategy.py
 from __future__ import annotations
-
 import json
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -14,7 +13,7 @@ from typing import List, Optional
 class RerunAttempt:
     profile_file: Optional[str] = None
     provider: Optional[str] = None
-    context_files: Optional[List[str]] = None
+    context_files: Optional[List[str]] = None  
 
 
 # ----------------------------------------------------------------------
@@ -36,6 +35,8 @@ class RerunBlock:
             for a in data.get("attempts", [])
         ]
         return RerunBlock(attempts=attempts)
+
+
 
 
 # ----------------------------------------------------------------------
@@ -64,14 +65,6 @@ class RerunStrategy:
 
         blocks = [RerunBlock.from_dict(b) for b in data_blocks]
         return RerunStrategy(blocks=blocks)
-
-# core/strategy/rerun_strategy.py
-from __future__ import annotations
-
-import json
-from dataclasses import dataclass, field
-from pathlib import Path
-from typing import List, Optional
 
 
 # ----------------------------------------------------------------------

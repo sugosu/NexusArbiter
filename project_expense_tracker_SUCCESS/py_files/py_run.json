@@ -1,0 +1,136 @@
+{
+  "log_io": {
+    "enabled": true,
+    "log_dir": "logs/expense_tracker/io",
+    "request_file_pattern": "{run_name}__{attempt}__request.json",
+    "response_file_pattern": "{run_name}__{attempt}__response.json"
+  },
+  "runs": [
+    {
+      "name": "expense_tracker_app_generator",
+      "profile_file": "context_files/profiles/python/openai-5/coders/py_generator.json",
+      "provider": "openai",
+
+      "context_file": [
+        "project_expense_tracker/manifest/manifest.json",
+        "project_expense_tracker/general_rules/python_rules.json"
+      ],
+
+      "task_description": "Using manifest.json as the canonical source of truth, generate the Python module expense_tracker/app.py implementing the App class described in the manifest (id: expense_tracker.app.App). The file must define the App class in the expense_tracker.app module, with the imports, fields, constructor, and methods exactly as specified in manifest.json, suitable as the top-level orchestration entrypoint for the ExpenseTrackerLocalJson system.",
+
+      "target_file": "project_expense_tracker/expense_tracker/app.py",
+
+      "rerun_strategy": null,
+      "rerun_index": 0,
+      "target_run": null
+    },
+    {
+      "name": "expense_tracker_controller_generator",
+      "profile_file": "context_files/profiles/python/openai-5/coders/py_generator.json",
+      "provider": "openai",
+
+      "context_file": [
+        "project_expense_tracker/manifest/manifest.json",
+        "project_expense_tracker/general_rules/python_rules.json"
+      ],
+
+      "task_description": "Using manifest.json as the canonical source of truth, generate the Python module expense_tracker/controller.py implementing the ExpenseController class described in the manifest (id: expense_tracker.controller.ExpenseController). The file must define ExpenseController in the expense_tracker.controller module, with imports, fields, constructor, and methods exactly as specified, acting as the domain orchestrator that validates commands and delegates to ExpenseService while forwarding storage_path explicitly.",
+
+      "target_file": "project_expense_tracker/expense_tracker/controller.py",
+
+      "rerun_strategy": null,
+      "rerun_index": 0,
+      "target_run": null
+    },
+    {
+      "name": "expense_tracker_service_generator",
+      "profile_file": "context_files/profiles/python/openai-5/coders/py_generator.json",
+      "provider": "openai",
+
+      "context_file": [
+        "project_expense_tracker/manifest/manifest.json",
+        "project_expense_tracker/general_rules/python_rules.json"
+      ],
+
+      "task_description": "Using manifest.json as the canonical source of truth, generate the Python module expense_tracker/service.py implementing the ExpenseService class described in the manifest (id: expense_tracker.service.ExpenseService). The file must define ExpenseService in the expense_tracker.service module, with imports, fields, constructor, and methods exactly as specified, encapsulating domain rules and delegating persistence to ExpenseRepository while treating storage_path as a method-level parameter.",
+
+      "target_file": "project_expense_tracker/expense_tracker/service.py",
+
+      "rerun_strategy": null,
+      "rerun_index": 0,
+      "target_run": null
+    },
+    {
+      "name": "expense_tracker_repository_generator",
+      "profile_file": "context_files/profiles/python/openai-5/coders/py_generator.json",
+      "provider": "openai",
+
+      "context_file": [
+        "project_expense_tracker/manifest/manifest.json",
+        "project_expense_tracker/general_rules/python_rules.json"
+      ],
+
+      "task_description": "Using manifest.json as the canonical source of truth, generate the Python module expense_tracker/repository.py implementing the ExpenseRepository class described in the manifest (id: expense_tracker.repository.ExpenseRepository). The file must define ExpenseRepository in the expense_tracker.repository module, with imports, fields, constructor, and methods exactly as specified, mapping between Expense domain objects and JSON-serializable structures and delegating raw file I/O to JsonStorage without storing storage_path as internal state.",
+
+      "target_file": "project_expense_tracker/expense_tracker/repository.py",
+
+      "rerun_strategy": null,
+      "rerun_index": 0,
+      "target_run": null
+    },
+    {
+      "name": "expense_tracker_storage_generator",
+      "profile_file": "context_files/profiles/python/openai-5/coders/py_generator.json",
+      "provider": "openai",
+
+      "context_file": [
+        "project_expense_tracker/manifest/manifest.json",
+        "project_expense_tracker/general_rules/python_rules.json"
+      ],
+
+      "task_description": "Using manifest.json as the canonical source of truth, generate the Python module expense_tracker/storage.py implementing the JsonStorage class described in the manifest (id: expense_tracker.storage.JsonStorage). The file must define JsonStorage in the expense_tracker.storage module, with imports, fields, constructor, and methods exactly as specified, providing low-level JSON read/write operations that accept a path per call and rely on AppLogger for observability, without performing domain mapping.",
+
+      "target_file": "project_expense_tracker/expense_tracker/storage.py",
+
+      "rerun_strategy": null,
+      "rerun_index": 0,
+      "target_run": null
+    },
+    {
+      "name": "expense_tracker_logging_generator",
+      "profile_file": "context_files/profiles/python/openai-5/coders/py_generator.json",
+      "provider": "openai",
+
+      "context_file": [
+        "project_expense_tracker/manifest/manifest.json",
+        "project_expense_tracker/general_rules/python_rules.json"
+      ],
+
+      "task_description": "Using manifest.json as the canonical source of truth, generate the Python module expense_tracker/logging.py implementing the AppLogger class described in the manifest (id: expense_tracker.logging.AppLogger). The file must define AppLogger in the expense_tracker.logging module, with imports, fields, constructor, and methods exactly as specified, acting as the project's logging adapter that wraps the stdlib logging.Logger and exposes debug/info/warning/error convenience methods.",
+
+      "target_file": "project_expense_tracker/expense_tracker/logging.py",
+
+      "rerun_strategy": null,
+      "rerun_index": 0,
+      "target_run": null
+    },
+    {
+      "name": "expense_tracker_models_generator",
+      "profile_file": "context_files/profiles/python/openai-5/coders/py_generator.json",
+      "provider": "openai",
+
+      "context_file": [
+        "project_expense_tracker/manifest/manifest.json",
+        "project_expense_tracker/general_rules/python_rules.json"
+      ],
+
+      "task_description": "Using manifest.json as the canonical source of truth, generate the Python module expense_tracker/models.py implementing the Expense class described in the manifest (id: expense_tracker.models.Expense). The file must define the passive domain model Expense in the expense_tracker.models module, with imports, fields, constructor, and helper methods (e.g., to_dict/from_dict) exactly as specified, without introducing dependencies, I/O, or logging.",
+      
+      "target_file": "project_expense_tracker/expense_tracker/models.py",
+
+      "rerun_strategy": null,
+      "rerun_index": 0,
+      "target_run": null
+    }
+  ]
+}

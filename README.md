@@ -150,4 +150,4 @@ See the LICENSE file for details.
 
 ## Contact
 
-onatgegeoglu@gmail.com
+sugosu  @gmail.com

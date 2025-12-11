@@ -19,11 +19,8 @@ venv/
 # this is for myself
 .merge_py.py
 .merged_all.txt
-
 *.txt
 /context_files
 /context_files_legacy
-
 /logs
-
 /tetris
