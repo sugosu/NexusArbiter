@@ -1,153 +1,72 @@
-# NexusArbiter
+# NexusArbiter — Compiled Creativity
 
-NexusArbiter is a deterministic, multi-provider AI orchestration framework designed for reliable code generation pipelines, structured execution flows, and advanced strategy-based reruns. It unifies OpenAI, Gemini, and custom providers into a consistent execution engine with traceable inputs, validated outputs, and reproducible runs.
+> **AI HACK**
+>
+> In this repository, there is a file called `merged_all`. It includes all necessary files in this project, along with this README.
+>
+> If you provide this file to your own AI and ask it to analyze the contents, the AI can guide you through the entire framework. It takes very little time for an AI to fully comprehend NexusArbiter.
 
-NexusArbiter focuses on:
+## Overview
 
-• Determinism – outputs must be structured and predictable  
-• Traceability – optional logging for requests and responses  
-• Control – explicit actions such as file_write, continue, break, rerun  
-• Extensibility – profiles, runs, and strategies are modular  
-• Reliability – system retry and controlled rerun attempts  
+NexusArbiter is a file-based, deterministic multi-agent framework. By design, it is:
 
-------------------------------------------------------------
+* **Reproducible**
+* **Auditable**
+* **Predictable**
+* **Configurable**
 
-## Who is this for?
+It proposes a structured and explicit way to interact with AI agents, making it an ideal candidate for real-world and enterprise use cases.
 
-• AI engineers building deterministic generation flows  
-• Backend/infra engineers automating code creation  
-• Researchers needing reproducible LLM behavior  
-• Teams enforcing strict JSON control and validation  
+## Requirements
 
+* **Python 3.10** or newer
+* A valid **API key** for a supported provider (OpenAI or Gemini)
+* Windows, macOS, or Linux
 
-## Key Features
+## What Is a Prompt Model?
 
-### Multi-provider AI Execution
-You can run OpenAI, Gemini, or custom providers in a single pipeline.  
+A Prompt Model is the complete set of context files required for an AI system to achieve a human-defined goal. It is not a single prompt. It is a structured execution model composed of explicit artifacts.
 
-### Deterministic Action Contract
-Models must return a structured JSON response with an agent.
+A Prompt Model consists of five file types:
 
-### Strategy-Based Reruns
-Validators can request reruns of earlier steps.  
-Strategies define:
+1.  **Runs**
+    Define the sequential execution of agents required to reach the target goal.
+2.  **Context Files**
+    Include rules, response schemas, and examples provided to the AI.
+3.  **Profiles**
+    Define agent personas, provider-specific parameters, and generic agent instructions.
+4.  **Target Files**
+    Represent validated outputs produced by agents.
+5.  **Reruns**
+    Define alternative or repeated agent calls that can be executed with the same or different context files when a previous step (typically a validator) requests a retry.
 
-• number of attempts  
-• alternative profiles  
-• alternative providers  
-• alternative context files  
+These abstractions are sufficient to model and execute most automation workflows required to achieve complex tasks.
 
-### System Retry Policy
-Retry logic handles:
+## How to Use
 
-• Request timeouts  
-• 429 (rate limit)  
-• 5xx server errors  
-• network errors  
-• Invalid Agent responses  
+NexusArbiter follows a **Bring Your Own Key** philosophy and currently supports OpenAI and Gemini. Additional providers will be added.
 
-Configured globally in runs.json.
+### Configure your API key
 
-### Optional Request/Response Logging
-When enabled, NexusArbiter writes:
+You can set your API key using a `.env` file.
+Or by setting an environment variable directly on Windows.
 
-• request payloads  
-• raw responses  
-• metadata (run, attempt, provider)  
+### Prepare a run configuration
 
-to disk for debugging and auditing.
+Locate a `run.json` file (an example is provided in the repository). Place a simple application idea inside it. The more context you provide, the better the result will be. With the current Prompt Model, NexusArbiter is optimized for small applications.
 
-------------------------------------------------------------
+### Run the workflow
 
-## Repository Structure
+Run the workflow using:
 
-NexusArbiter/
-  core/
-    actions/
-    ai_client/
-    config/
-    logger/
-    runtime/
-    strategy/
-    utils/
-  context_files/
-    profiles/
-    runs/
-    strategies/
-    general/
-  app/
-  tests/
-  README.md
-  LICENSE
+python main.py myproject/run.json
 
-------------------------------------------------------------
+Note: This entry point will be replaced with a packaged CLI in a future release.
 
-## How NexusArbiter Works
+While the workflow is running, you can inspect the run.json file and related context files, or ask your AI to explain them.
 
-### 1. RunConfig Loads Pipeline Definition
-Runs.json defines the steps to execute, along with allowed actions, profiles, strategies, and parameters.
+Output
 
-### 2. PipelineRunner Executes Runs
-It manages:
+When execution completes, multiple files will be generated as output.
 
-• ordering  
-• retry attempts  
-• rerun triggers  
-• break / continue flow  
-
-### 3. AppRunner Handles Provider Invocation
-AppRunner loads a profile, builds a prompt, calls the provider, parses the structured output, and executes the actions.
-
-### 4. Action Execution Layer
-Available built-in actions:
-
-• file_write  
-• continue  
-• break  
-• rerun  
-
-Actions update the environment and control the pipeline.
-
-### 5. Validator-Driven Reruns
-Validators may request reruns, activating a strategy block.  
-Overrides may modify:
-
-• provider  
-• profile  
-• context files  
-
-Execution then returns to the validator until attempts expire.
-
-------------------------------------------------------------
-
-## Profiles, Context, and Strategies
-
-### Profiles
-Define:
-
-• provider and model  
-• temperature, top_p, max_tokens, model specific parameters  
-• system and user templates  
-• placeholders such as task_description, agent_input, rules_block, context_block  
-
-### Context Files
-Used to inject:
-
-• prior outputs  
-• code  
-• configuration  
-• reference material  
-
-### Strategies
-Define deterministic rerun behavior via blocks and attempts, enabling correction cycles.
-
-------------------------------------------------------------
-
-## License
-
-This project is licensed under the MIT License.
-See the LICENSE file for details.
-
-## Contact
-
-sugosu  @gmail.com
+Enjoy your generated application.
