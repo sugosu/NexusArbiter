@@ -1,5 +1,5 @@
 
-**AI HACK**
+##!!!AI HACK!!!##
 
  In this repository, there is a file called `merged_all`. It includes all necessary files in this project, along with this README.
  If you provide this file to your own AI and ask it to analyze the contents, the AI can guide you through the entire framework. It takes very little time for an AI to fully comprehend NexusArbiter.
