@@ -2,20 +2,21 @@
 from __future__ import annotations
 
 import json
+import inspect
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from core.logger import BasicLogger
-from core.actions.registry import ActionRegistry
 from core.actions.base_action import ActionContext, BaseAction
-from core.ai_client.openai_client import OpenAIClient
+from core.actions.registry import ActionRegistry
 from core.ai_client.gemini_client import GeminiClient
+from core.ai_client.openai_client import OpenAIClient
+from core.logger import BasicLogger
+
+import core.runtime.response_validation as rv
 
 
 class RunResult:
-    """
-    Returned by AppRunner after a single model call + action execution.
-    """
+    """Returned by AppRunner after a single model call + action execution."""
 
     def __init__(
         self,
@@ -24,34 +25,41 @@ class RunResult:
         should_break: bool = False,
         change_strategy_requested: bool = False,
         change_strategy_reason: Optional[str] = None,
+        # NOTE: core/app.py expects these fields today (keep for compatibility).
+        retry_requested: bool = False,
+        retry_reason: Optional[str] = None,
     ):
         self.success = success
         self.should_continue = should_continue
         self.should_break = should_break
         self.change_strategy_requested = change_strategy_requested
         self.change_strategy_reason = change_strategy_reason
+        self.retry_requested = retry_requested
+        self.retry_reason = retry_reason
 
 
 class AppRunner:
     """
     Executes one RunItem through the AI provider + action pipeline.
 
-    Responsibilities:
-    - Build request payloads for the model.
-    - Invoke provider client.
-    - Log request + response files if enabled.
-    - Parse the response JSON.
-    - Execute actions in order.
-    - Return a RunResult with control-flow flags.
+    Responsibilities (v0.1):
+    - Load profile JSON
+    - Build request payload (profile messages + context)
+    - Send request to provider
+    - Parse response into agent.actions
+    - Validate response envelope + (optional) JSON Schema
+    - Enforce allowed actions
+    - Execute actions in order
+    - Return RunResult
     """
 
     def __init__(self, project_root: Path):
-        self.project_root = Path(project_root)
+        self.project_root = Path(project_root).resolve()
         self.logger = BasicLogger("AppRunner").get_logger()
-
-        # Register all built-in actions once
         ActionRegistry.register_defaults()
 
+    # ------------------------------------------------------------------
+    # Public API
     # ------------------------------------------------------------------
     def run(
         self,
@@ -62,30 +70,19 @@ class AppRunner:
         task_description: Optional[str],
         agent_input_overrides: Dict[str, Any],
     ) -> RunResult:
-        """
-        Execute a single RunItem via the configured AI provider + actions.
-        """
+        # Keep signature for backwards compatibility; unused parameters are intentional.
+        _ = profile_name, class_name
 
-        # Extract key runtime parameters ---------------------------------
         profile_file = run_params["profile_file"]
         context_files = run_params["context_files"]
         target_file = run_params.get("target_file")
         provider_override = run_params.get("provider_override")
+        attempt_number = int(run_params["attempt_number"])
+        log_io_settings = run_params.get("log_io_settings") or {}
 
-        attempt_number = run_params["attempt_number"]
-        log_io_settings = run_params["log_io_settings"]
+        profile = self._load_profile(profile_file)
+        provider = provider_override or profile.get("provider", "openai")
 
-        # Load profile JSON ----------------------------------------------
-        with open(profile_file, "r", encoding="utf-8") as f:
-            profile = json.load(f)
-
-        provider = (
-            provider_override
-            if provider_override
-            else profile.get("provider", "openai")
-        )
-
-        # Construct request ----------------------------------------------
         request_payload = self._build_request_payload(
             profile=profile,
             context_files=context_files,
@@ -94,45 +91,52 @@ class AppRunner:
             agent_input_overrides=agent_input_overrides,
         )
 
-        # Write request log file -----------------------------------------
-        if log_io_settings.get("enabled"):
+        if bool(log_io_settings.get("enabled", False)):
             self._write_io_file(
                 log_io_settings=log_io_settings,
-                run_name=run_item.name,
+                run_name=getattr(run_item, "name", "unnamed_run"),
                 attempt=attempt_number,
                 is_request=True,
                 content=request_payload,
             )
 
-        # Call provider ---------------------------------------------------
-        if provider == "openai":
-            client = OpenAIClient(self.logger)
-        elif provider == "gemini":
-            client = GeminiClient(self.logger)
-        else:
-            raise ValueError(f"Unsupported provider '{provider}'")
-
+        client = self._create_client(provider)
         raw_response = client.send(request_payload)
 
-        # Write response log file ----------------------------------------
-        if log_io_settings.get("enabled"):
+        if bool(log_io_settings.get("enabled", False)):
             self._write_io_file(
                 log_io_settings=log_io_settings,
-                run_name=run_item.name,
+                run_name=getattr(run_item, "name", "unnamed_run"),
                 attempt=attempt_number,
                 is_request=False,
                 content=raw_response,
             )
 
-        # Parse provider output ------------------------------------------
+        # ----------------------------
+        # Hard constraints:
+        # 1) envelope validation
+        # 2) optional JSON Schema validation (if schema exists)
+        # 3) allowed-actions enforcement
+        # ----------------------------
         try:
-            actions = self._extract_agent_actions(raw_response)
-        except Exception as e:
-            self.logger.error(f"Failed to parse model output: {e}")
+            content_obj = self._extract_content_object(raw_response)
+
+            actions = rv.AgentEnvelopeValidator().validate_and_normalize(content_obj)
+
+            schema = rv.ResponseSchemaProvider().get_schema(profile)
+            if schema is not None:
+                rv.JsonSchemaValidator().validate(instance=content_obj, schema=schema)
+
+            rv.AllowedActionsPolicy(getattr(run_item, "allowed_actions", [])).enforce(actions)
+
+        except (rv.SchemaValidationError, rv.DisallowedActionError) as e:
+            self.logger.error("Response validation failed: %s", e, exc_info=True)
+            return RunResult(success=False, should_break=True)
+        except Exception as e:  # noqa: BLE001
+            self.logger.error("Response handling failed: %s", e, exc_info=True)
             return RunResult(success=False, should_break=True)
 
-        # Execute actions -------------------------------------------------
-        result = self._execute_actions(
+        return self._execute_actions(
             actions=actions,
             run_item=run_item,
             target_file=target_file,
@@ -140,11 +144,34 @@ class AppRunner:
             log_io_settings=log_io_settings,
         )
 
-        return result
+    # ------------------------------------------------------------------
+    # Profile / provider
+    # ------------------------------------------------------------------
+    def _load_profile(self, profile_file: str) -> Dict[str, Any]:
+        """
+        Resolve profile_file relative to project_root (unless absolute).
+        """
+        path = Path(profile_file)
+        if not path.is_absolute():
+            path = (self.project_root / path).resolve()
 
-    # ----------------------------------------------------------------------
-    # Build the request JSON payload according to profile rules
-    # ----------------------------------------------------------------------
+        with path.open("r", encoding="utf-8") as f:
+            data = json.load(f)
+
+        if not isinstance(data, dict):
+            raise ValueError(f"Profile must be a JSON object: {path}")
+        return data
+
+    def _create_client(self, provider: str) -> Any:
+        if provider == "openai":
+            return OpenAIClient(self.logger)
+        if provider == "gemini":
+            return GeminiClient(self.logger)
+        raise ValueError(f"Unsupported provider '{provider}'")
+
+    # ------------------------------------------------------------------
+    # Request payload building
+    # ------------------------------------------------------------------
     def _build_request_payload(
         self,
         profile: Dict[str, Any],
@@ -153,43 +180,39 @@ class AppRunner:
         task_description: Optional[str],
         agent_input_overrides: Dict[str, Any],
     ) -> Dict[str, Any]:
-        """
-        Build the model payload using the profile template and context files.
-        """
-
         agent_input: Dict[str, Any] = {
             "task_description": task_description,
-            "allowed_actions": run_item.allowed_actions,
+            "allowed_actions": getattr(run_item, "allowed_actions", []),
         }
-        agent_input.update(agent_input_overrides)
+        if isinstance(agent_input_overrides, dict) and agent_input_overrides:
+            agent_input.update(agent_input_overrides)
 
-        # Load context files
-        context_blocks: List[str] = []
-        for file_path in context_files:
-            full_path = self.project_root / file_path
-            if full_path.exists():
-                with open(full_path, "r", encoding="utf-8") as f:
-                    context_blocks.append(
-                        f"=== CONTEXT FILE: {file_path} ===\n{f.read()}"
-                    )
+        context_block = self._load_context_block(context_files)
 
-        context_block = "\n\n".join(context_blocks)
-
-        # Fill template messages
         messages: List[Dict[str, str]] = []
-        for msg in profile.get("messages", []):
-            role = msg["role"]
-            content = msg["content"]
+        for msg in profile.get("messages", []) or []:
+            if not isinstance(msg, dict):
+                continue
 
-            # Replace placeholders
-            content = content.replace("${agent_input}", json.dumps(agent_input))
+            role = msg.get("role")
+            content = msg.get("content")
+            if not isinstance(role, str) or not isinstance(content, str):
+                continue
+
+            content = content.replace("${agent_input}", json.dumps(agent_input, ensure_ascii=False))
             content = content.replace("${rules_block}", "")
             content = content.replace("${task_description}", task_description or "")
             content = content.replace("${context_block}", context_block)
 
             messages.append({"role": role, "content": content})
 
-        payload: Dict[str, Any] = {
+        if not messages:
+            raise ValueError(
+                f"Profile '{profile.get('name', '<unnamed>')}' produced empty messages. "
+                "Ensure profile.messages is a non-empty list of {{role, content}}."
+            )
+
+        return {
             "model": profile.get("model"),
             "temperature": profile.get("temperature"),
             "top_p": profile.get("top_p"),
@@ -198,11 +221,31 @@ class AppRunner:
             "response_format": profile.get("response_format"),
         }
 
-        return payload
+    def _load_context_block(self, context_files: List[str]) -> str:
+        if not context_files:
+            return ""
 
-    # ----------------------------------------------------------------------
+        blocks: List[str] = []
+        for rel in context_files:
+            p = Path(rel)
+            if not p.is_absolute():
+                p = (self.project_root / p).resolve()
+
+            if not p.exists():
+                continue
+
+            try:
+                raw = p.read_text(encoding="utf-8")
+            except UnicodeDecodeError:
+                continue
+
+            blocks.append(f"=== CONTEXT FILE: {rel} ===\n{raw}")
+
+        return "\n\n".join(blocks)
+
+    # ------------------------------------------------------------------
     # Request/response logging
-    # ----------------------------------------------------------------------
+    # ------------------------------------------------------------------
     def _write_io_file(
         self,
         log_io_settings: Dict[str, Any],
@@ -211,60 +254,42 @@ class AppRunner:
         is_request: bool,
         content: Any,
     ) -> None:
-        """
-        Write a request or response JSON file under log_io.log_dir
-        according to the configured filename patterns.
-        """
+        log_dir_cfg = str(log_io_settings.get("log_dir", "logs/io"))
+        log_dir = Path(log_dir_cfg)
+        if not log_dir.is_absolute():
+            log_dir = (self.project_root / log_dir).resolve()
 
-        log_dir = Path(log_io_settings["log_dir"])
         pattern = (
-            log_io_settings["request_file_pattern"]
+            log_io_settings.get("request_file_pattern", "{run_name}__{attempt}__request.json")
             if is_request
-            else log_io_settings["response_file_pattern"]
+            else log_io_settings.get("response_file_pattern", "{run_name}__{attempt}__response.json")
         )
 
-        filename = pattern.format(run_name=run_name, attempt=attempt)
+        filename = str(pattern).format(run_name=run_name, attempt=attempt)
         log_dir.mkdir(parents=True, exist_ok=True)
-
         path = log_dir / filename
 
         try:
-            with open(path, "w", encoding="utf-8") as f:
+            with path.open("w", encoding="utf-8") as f:
                 json.dump(content, f, indent=2, ensure_ascii=False)
             self.logger.info(
-                f"[IO-LOG] {'Request' if is_request else 'Response'} saved to {path}"
+                "[IO-LOG] %s saved to %s",
+                "Request" if is_request else "Response",
+                path,
             )
-        except Exception as e:
-            self.logger.error(f"Failed to write log file '{path}': {e}")
+        except Exception as e:  # noqa: BLE001
+            self.logger.error("Failed to write log file '%s': %s", path, e, exc_info=True)
 
-    # ----------------------------------------------------------------------
-    # Extract the `agent.actions` array from the provider output
-    # ----------------------------------------------------------------------
-    def _extract_agent_actions(self, raw_response: Dict[str, Any]) -> List[Dict[str, Any]]:
+    # ------------------------------------------------------------------
+    # Response parsing (envelope extraction)
+    # ------------------------------------------------------------------
+    def _extract_content_object(self, raw_response: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Unwrap provider-specific envelopes and return agent.actions list.
-
-        Supported shapes:
-
-        1) OpenAI / Gemini-style chat completion:
-           {
-             "choices": [
-               {
-                 "message": {
-                   "content": <JSON object OR JSON string>
-                 }
-               }
-             ]
-           }
-
-        2) Direct JSON with 'agent':
-           {
-             "agent": { "actions": [...] }
-           }
+        Returns the model message content as a dict.
+        Supports OpenAI/Gemini-style envelope: {"choices":[{"message":{"content": <str|dict>}}]}
         """
         content: Any = raw_response
 
-        # 1) If it's a chat-completions style envelope, unwrap choices[0].message.content
         if isinstance(raw_response, dict) and "choices" in raw_response:
             choices = raw_response.get("choices") or []
             if not choices:
@@ -274,33 +299,20 @@ class AppRunner:
             message = first_choice.get("message") or {}
             content = message.get("content")
 
-        # 2) If content is a JSON string, parse it
         if isinstance(content, str):
             try:
                 content = json.loads(content)
             except json.JSONDecodeError as e:
-                raise ValueError(
-                    f"Model response message content is not valid JSON: {e}"
-                ) from e
+                raise ValueError(f"Model response message content is not valid JSON: {e}") from e
 
-        # 3) If content is still not a dict, this is an error
         if not isinstance(content, dict):
             raise ValueError("Model response message content is not a JSON object")
 
-        # 4) Now expect the NexusArbiter contract: content["agent"]["actions"]
-        agent = content.get("agent")
-        if not isinstance(agent, dict):
-            raise ValueError("Model response missing 'agent' object")
+        return content
 
-        actions = agent.get("actions")
-        if not isinstance(actions, list):
-            raise ValueError("Model response 'agent.actions' must be a list")
-
-        return actions
-
-    # ----------------------------------------------------------------------
-    # Action execution pipeline
-    # ----------------------------------------------------------------------
+    # ------------------------------------------------------------------
+    # Action execution
+    # ------------------------------------------------------------------
     def _execute_actions(
         self,
         actions: List[Dict[str, Any]],
@@ -309,14 +321,10 @@ class AppRunner:
         attempt_number: int,
         log_io_settings: Dict[str, Any],
     ) -> RunResult:
-        """
-        Execute the list of actions returned by the model.
-        """
-
         ctx = ActionContext(
             project_root=str(self.project_root),
             target_file=target_file,
-            run_name=run_item.name,
+            run_name=getattr(run_item, "name", "unnamed_run"),
             run_item=run_item,
             logger=self.logger,
             attempt_number=attempt_number,
@@ -325,17 +333,26 @@ class AppRunner:
 
         for action_obj in actions:
             action_type = action_obj["type"]
-            params = action_obj.get("params", {})
+            params = action_obj.get("params", {}) or {}
 
             try:
                 action: BaseAction = ActionRegistry.create(action_type)
             except ValueError as e:
-                self.logger.error(f"Unknown action type '{action_type}': {e}")
+                self.logger.error("Unknown action type '%s': %s", action_type, e)
                 return RunResult(success=False, should_break=True)
 
-            action.execute(ctx, params)
+            try:
+                self._call_action_execute(action, ctx, params)
+            except Exception as e:  # noqa: BLE001
+                self.logger.error(
+                    "Action '%s' failed: %s (params=%r)",
+                    action_type,
+                    e,
+                    params,
+                    exc_info=True,
+                )
+                return RunResult(success=False, should_break=True)
 
-            # Control-flow checks after each action
             if ctx.should_break:
                 return RunResult(success=True, should_break=True)
 
@@ -346,5 +363,39 @@ class AppRunner:
                     change_strategy_reason=ctx.change_strategy_reason,
                 )
 
-        # Completed all actions without break/strategy-change
         return RunResult(success=True, should_continue=True)
+
+    @staticmethod
+    def _call_action_execute(action: BaseAction, ctx: ActionContext, params: Dict[str, Any]) -> None:
+        """
+        Defensive adapter for action.execute.
+
+        Bound method signatures:
+          - execute(ctx, params) -> 2 parameters (expected)
+          - execute(ctx)        -> 1 parameter  (legacy only)
+        """
+        try:
+            sig = inspect.signature(action.execute)
+            param_count = len(sig.parameters)
+        except (TypeError, ValueError):
+            # Prefer modern contract first
+            try:
+                action.execute(ctx, params)
+                return
+            except TypeError:
+                action.execute(ctx)  # type: ignore[misc]
+                return
+
+        if param_count == 2:
+            action.execute(ctx, params)
+            return
+
+        if param_count == 1:
+            action.execute(ctx)  # type: ignore[misc]
+            return
+
+        # Unexpected signature: try modern then legacy
+        try:
+            action.execute(ctx, params)
+        except TypeError:
+            action.execute(ctx)  # type: ignore[misc]

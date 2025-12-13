@@ -2,74 +2,72 @@
 from __future__ import annotations
 
 import json
-from typing import Any, Dict
+from typing import Any, Dict, List
 
 import openai
 
 
 class OpenAIClient:
-    """
-    Thin wrapper around OpenAI's Chat Completions API.
-
-    Requirements:
-    - Accepts a ready-to-send request payload.
-    - Returns a raw response dict.
-    - AppRunner handles logging and parsing.
-    """
+    """Thin wrapper around OpenAI Chat Completions. AppRunner owns parsing + IO logging."""
 
     def __init__(self, logger):
         self.logger = logger
         self.client = openai.OpenAI()
 
-    # ------------------------------------------------------------------
     def send(self, payload: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Send a chat completion request to OpenAI, handling both GPT-4 and GPT-5.x
-        parameter differences transparently.
-
-        - GPT-4 and earlier: use `max_tokens`
-        - GPT-5.x: use `max_completion_tokens`
-        """
         self.logger.info("[OpenAIClient] Sending request to OpenAI...")
 
+        model_name = str(payload.get("model", "")).strip()
+        messages = payload.get("messages")
+
+        # Defensive: OpenAI rejects empty messages arrays.
+        if not isinstance(messages, list) or len(messages) == 0:
+            raise ValueError("Invalid payload: 'messages' must be a non-empty list.")
+
+        # Basic validation to catch bad shapes early.
+        if not self._looks_like_messages(messages):
+            raise ValueError("Invalid payload: 'messages' must be a list of {role, content} objects.")
+
+        chat_args: Dict[str, Any] = {
+            "model": model_name,
+            "messages": messages,
+            "temperature": payload.get("temperature"),
+            "top_p": payload.get("top_p"),
+            "response_format": payload.get("response_format"),
+        }
+
+        # Remove None values to avoid sending unsupported nulls.
+        chat_args = {k: v for k, v in chat_args.items() if v is not None}
+
+        # Token limit handling:
+        # - GPT-5.x prefers max_completion_tokens
+        # - older models use max_tokens
+        if model_name.startswith("gpt-5"):
+            max_completion_tokens = payload.get("max_completion_tokens")
+            if max_completion_tokens is None:
+                max_completion_tokens = payload.get("max_tokens")
+            if max_completion_tokens is not None:
+                chat_args["max_completion_tokens"] = max_completion_tokens
+        else:
+            max_tokens = payload.get("max_tokens")
+            if max_tokens is not None:
+                chat_args["max_tokens"] = max_tokens
+
         try:
-            model_name = str(payload.get("model", "")).strip()
-
-            # Base arguments shared across all chat models
-            chat_args: Dict[str, Any] = {
-                "model": model_name,
-                "messages": payload["messages"],
-                "temperature": payload.get("temperature"),
-                "top_p": payload.get("top_p"),
-                "response_format": payload.get("response_format"),
-            }
-
-            # Remove None values to avoid sending unsupported nulls
-            chat_args = {k: v for k, v in chat_args.items() if v is not None}
-
-            # Handle token limits depending on model family
-            # GPT-5.x: requires max_completion_tokens
-            if model_name.startswith("gpt-5"):
-                max_completion_tokens = (
-                    payload.get("max_completion_tokens")
-                    if payload.get("max_completion_tokens") is not None
-                    else payload.get("max_tokens")
-                )
-                if max_completion_tokens is not None:
-                    chat_args["max_completion_tokens"] = max_completion_tokens
-            else:
-                # GPT-4.x and older: still use max_tokens
-                if payload.get("max_tokens") is not None:
-                    chat_args["max_tokens"] = payload["max_tokens"]
-
             response = self.client.chat.completions.create(**chat_args)
-
-            # Convert SDK object → plain dict
-            raw = json.loads(response.model_dump_json())
-
-            self.logger.info("[OpenAIClient] Received response.")
-            return raw
-
         except Exception as e:
-            self.logger.error(f"[OpenAIClient] API error: {e}")
+            self.logger.error("[OpenAIClient] API error: %s", e)
             raise
+
+        raw = json.loads(response.model_dump_json())
+        self.logger.info("[OpenAIClient] Received response.")
+        return raw
+
+    @staticmethod
+    def _looks_like_messages(messages: List[Any]) -> bool:
+        for m in messages:
+            if not isinstance(m, dict):
+                return False
+            if "role" not in m or "content" not in m:
+                return False
+        return True

@@ -4,12 +4,9 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 
 
-# ------------------------------------------------------
-# New dataclass: LogIOSettings
-# ------------------------------------------------------
 @dataclass
 class LogIOSettings:
     enabled: bool = False
@@ -24,21 +21,16 @@ class LogIOSettings:
 
         return LogIOSettings(
             enabled=bool(data.get("enabled", False)),
-            log_dir=data.get("log_dir", "logs/io"),
-            request_file_pattern=data.get(
-                "request_file_pattern",
-                "{run_name}__{attempt}__request.json",
+            log_dir=str(data.get("log_dir", "logs/io")),
+            request_file_pattern=str(
+                data.get("request_file_pattern", "{run_name}__{attempt}__request.json")
             ),
-            response_file_pattern=data.get(
-                "response_file_pattern",
-                "{run_name}__{attempt}__response.json",
+            response_file_pattern=str(
+                data.get("response_file_pattern", "{run_name}__{attempt}__response.json")
             ),
         )
 
 
-# ------------------------------------------------------
-# RunItem (modified to include log_io override)
-# ------------------------------------------------------
 @dataclass
 class RunItem:
     name: str
@@ -48,7 +40,7 @@ class RunItem:
     target_file: Optional[str]
     allowed_actions: List[str]
 
-    # Rerun-related fields
+    # Rerun-related fields (validator step)
     rerun_index: Optional[int] = None
     target_run: Optional[str] = None
     rerun_strategy: Optional[str] = None
@@ -74,15 +66,18 @@ class RunItem:
         )
 
 
-# ------------------------------------------------------
-# RunConfig
-# ------------------------------------------------------
+@dataclass(frozen=True)
+class IncludeRun:
+    include_run: str
+
+
+RunStep = Union[RunItem, IncludeRun]
+
+
 @dataclass
 class RunConfig:
-    runs: List[RunItem] = field(default_factory=list)
+    runs: List[RunStep] = field(default_factory=list)
     retry_policy: Optional[Dict[str, Any]] = None
-
-    # NEW: global log-io settings
     log_io_settings: LogIOSettings = field(default_factory=LogIOSettings)
 
     @staticmethod
@@ -91,43 +86,77 @@ class RunConfig:
         with path.open("r", encoding="utf-8") as f:
             data = json.load(f)
 
-        # Load top-level log_io block
-        log_io_settings = LogIOSettings.from_dict(data.get("log_io"))
+        if not isinstance(data, dict):
+            raise ValueError("Run config root must be a JSON object.")
 
+        log_io_settings = LogIOSettings.from_dict(data.get("log_io"))
         retry_policy = data.get("retry_policy")
 
-        runs_data = data.get("runs", [])
-        runs: List[RunItem] = []
+        runs_raw = data.get("runs", [])
+        if runs_raw is None:
+            runs_raw = []
+        if not isinstance(runs_raw, list):
+            raise ValueError("'runs' must be a list.")
 
-        for run_obj in runs_data:
-            # backward compatibility for strategy names
-            rerun_index = run_obj.get("rerun_index", run_obj.get("strategy_index"))
-            rerun_strategy = run_obj.get("rerun_strategy", run_obj.get("strategy_file"))
+        runs: List[RunStep] = []
+        for idx, obj in enumerate(runs_raw):
+            if not isinstance(obj, dict):
+                raise ValueError(f"runs[{idx}] must be an object.")
 
-            item = RunItem(
-                name=run_obj.get("name"),
-                profile_file=run_obj["profile_file"],
-                task_description=run_obj.get("task_description"),
-                context_file=run_obj.get("context_file", []),
-                target_file=run_obj.get("target_file"),
-                allowed_actions=run_obj.get("allowed_actions", []),
+            # include_run step
+            if "include_run" in obj:
+                include_val = obj.get("include_run")
+                if not isinstance(include_val, str) or not include_val.strip():
+                    raise ValueError(f"runs[{idx}].include_run must be a non-empty string.")
 
-                rerun_index=rerun_index,
-                target_run=run_obj.get("target_run"),
-                rerun_strategy=rerun_strategy,
+                # enforce mutual exclusivity (schema stays the same; error earlier)
+                forbidden = [k for k in ("profile_file", "context_file", "target_file", "allowed_actions") if k in obj]
+                if forbidden:
+                    raise ValueError(
+                        f"runs[{idx}] include_run step must not include agent fields: {forbidden}."
+                    )
 
-                strategy_index=run_obj.get("strategy_index"),
-                strategy_file=run_obj.get("strategy_file"),
+                runs.append(IncludeRun(include_run=include_val))
+                continue
 
-                log_io_override=run_obj.get("log_io"),
-                retry=run_obj.get("retry"),
-                profile_name=run_obj.get("profile_name"),
+            # agent step
+            if "profile_file" not in obj:
+                raise ValueError(f"runs[{idx}] missing required field 'profile_file'.")
+
+            rerun_index = obj.get("rerun_index", obj.get("strategy_index"))
+            rerun_strategy = obj.get("rerun_strategy", obj.get("strategy_file"))
+
+            context_file = obj.get("context_file", [])
+            if context_file is None:
+                context_file = []
+            if not isinstance(context_file, list):
+                raise ValueError(f"runs[{idx}].context_file must be a list.")
+            context_file = [str(x) for x in context_file]
+
+            allowed_actions = obj.get("allowed_actions", [])
+            if allowed_actions is None:
+                allowed_actions = []
+            if not isinstance(allowed_actions, list):
+                raise ValueError(f"runs[{idx}].allowed_actions must be a list.")
+            allowed_actions = [str(x) for x in allowed_actions]
+
+            runs.append(
+                RunItem(
+                    name=str(obj.get("name") or ""),
+                    profile_file=str(obj["profile_file"]),
+                    task_description=obj.get("task_description"),
+                    context_file=context_file,
+                    target_file=obj.get("target_file"),
+                    allowed_actions=allowed_actions,
+                    rerun_index=rerun_index,
+                    target_run=obj.get("target_run"),
+                    rerun_strategy=rerun_strategy,
+                    strategy_index=obj.get("strategy_index"),
+                    strategy_file=obj.get("strategy_file"),
+                    log_io_override=obj.get("log_io"),
+                    retry=obj.get("retry"),
+                    profile_name=obj.get("profile_name"),
+                )
             )
 
-            runs.append(item)
-
-        return RunConfig(
-            runs=runs,
-            retry_policy=retry_policy,
-            log_io_settings=log_io_settings,
-        )
+        return RunConfig(runs=runs, retry_policy=retry_policy, log_io_settings=log_io_settings)

@@ -16,7 +16,7 @@ def main(
     run_item: RunItem,
     run_params: Dict[str, Any],
 ) -> Dict[str, bool]:
-    """Thin wrapper around AppRunner (kept for backward compatibility)."""
+    """Backward-compatible wrapper around AppRunner."""
     project_root = Path(__file__).resolve().parents[1]
     runner = AppRunner(project_root=project_root)
 
@@ -29,7 +29,4 @@ def main(
         agent_input_overrides=agent_input,
     )
 
-    return {
-        "success": result.success,
-        "retry_requested": result.retry_requested,
-    }
+    return {"success": result.success, "retry_requested": result.retry_requested}

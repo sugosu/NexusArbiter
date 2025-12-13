@@ -6,7 +6,7 @@ OUTPUT_NAME = "merged_all.txt"
 LICENSE_NAME = "LICENSE"   # included explicitly
 
 # <<< SET THIS TO YOUR GENERATED PROJECT ROOT (relative or absolute) >>>
-DEFAULT_ROOT_DIR = "./library_manager/library"  # e.g. "expense_tracker" or "/full/path/to/expense_tracker"
+DEFAULT_ROOT_DIR = "./"  # e.g. "expense_tracker" or "/full/path/to/expense_tracker"
 
 
 def collect_all_files(root_dir: str, output_name: str) -> list[str]:
@@ -21,7 +21,8 @@ def collect_all_files(root_dir: str, output_name: str) -> list[str]:
                 continue
 
             # Include .py and .json but skip output file
-            if fname.endswith((".py", ".json")) and fname != output_name:
+            #if fname.endswith((".py",".json")) and fname != output_name:
+            if fname.endswith((".py")) and fname != output_name:
                 full_path = os.path.join(dirpath, fname)
                 files.append(full_path)
 

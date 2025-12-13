@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "nexusarbiter"
+version = "0.1.0"
+description = "Deterministic, file-based AI orchestration framework"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+dependencies = [
+  "openai>=1.0.0",
+  "python-dotenv>=1.0.0",
+  "rich>=13.0.0"
+]
+
+[project.scripts]
+nexusarbiter = "cli:main"
+
+[tool.setuptools]
+packages = ["core"]
+py-modules = ["cli"]
