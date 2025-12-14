@@ -51,8 +51,6 @@ class RunExecutor:
         return self.app_runner.run(
             run_item=run_item,
             run_params=run_params,
-            profile_name=getattr(run_item, "profile_name", None),
-            class_name=None,  # legacy field, intentionally unused in modern runs
             task_description=getattr(run_item, "task_description", None),
             agent_input_overrides={},  # modern flows rely on run_params instead
         )

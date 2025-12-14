@@ -45,18 +45,12 @@ class RunItem:
     target_run: Optional[str] = None
     rerun_strategy: Optional[str] = None
 
-    # Legacy backward-compatibility
-    strategy_index: Optional[int] = None
-    strategy_file: Optional[str] = None
 
     # Optional per-run I/O logging overrides
     log_io_override: Optional[Dict[str, Any]] = None
 
     # Provider override (set during rerun)
     provider_override: Optional[str] = None
-
-    retry: Optional[int] = None
-    profile_name: Optional[str] = None
 
     def is_validator(self) -> bool:
         return (
@@ -123,8 +117,9 @@ class RunConfig:
             if "profile_file" not in obj:
                 raise ValueError(f"runs[{idx}] missing required field 'profile_file'.")
 
-            rerun_index = obj.get("rerun_index", obj.get("strategy_index"))
-            rerun_strategy = obj.get("rerun_strategy", obj.get("strategy_file"))
+            rerun_index = obj.get("rerun_index")
+            rerun_strategy = obj.get("rerun_strategy")
+
 
             context_file = obj.get("context_file", [])
             if context_file is None:
@@ -151,11 +146,7 @@ class RunConfig:
                     rerun_index=rerun_index,
                     target_run=obj.get("target_run"),
                     rerun_strategy=rerun_strategy,
-                    strategy_index=obj.get("strategy_index"),
-                    strategy_file=obj.get("strategy_file"),
-                    log_io_override=obj.get("log_io"),
-                    retry=obj.get("retry"),
-                    profile_name=obj.get("profile_name"),
+                    log_io_override=obj.get("log_io")
                 )
             )
 

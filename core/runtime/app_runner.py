@@ -65,14 +65,9 @@ class AppRunner:
         self,
         run_item: Any,
         run_params: Dict[str, Any],
-        profile_name: Optional[str],
-        class_name: Optional[str],
         task_description: Optional[str],
         agent_input_overrides: Dict[str, Any],
     ) -> RunResult:
-        # Keep signature for backwards compatibility; unused parameters are intentional.
-        _ = profile_name, class_name
-
         profile_file = run_params["profile_file"]
         context_files = run_params["context_files"]
         target_file = run_params.get("target_file")
