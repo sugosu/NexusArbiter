@@ -27,3 +27,4 @@ venv/
 /setup_wizard.py
 /merge_py.py
 /nexusarbiter.egg-info
+/helper
