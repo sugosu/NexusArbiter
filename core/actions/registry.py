@@ -7,6 +7,7 @@ from core.actions.base_action import BaseAction
 from core.actions.break_action import BreakAction
 from core.actions.continue_action import ContinueAction
 from core.actions.file_write_action import FileWriteAction
+from core.actions.rerun_action import RerunAction
 
 
 
@@ -25,6 +26,7 @@ class ActionRegistry:
         cls.register(FileWriteAction)
         cls.register(ContinueAction)
         cls.register(BreakAction)
+        cls.register(RerunAction)
 
         cls._defaults_registered = True
 

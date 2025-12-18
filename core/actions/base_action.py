@@ -21,6 +21,8 @@ class ActionContext:
     # Strategy-change flags
     change_strategy_requested: bool = False
     change_strategy_reason: Optional[str] = None
+    change_strategy_name: Optional[str] = None
+    change_strategy_method: Optional[str] = None
 
     # Optional extended context (not required for the IO logging feature)
     attempt_number: int = 1

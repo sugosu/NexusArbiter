@@ -1,0 +1,19 @@
+{
+  "log_io": {
+    "enabled": true,
+    "log_dir": "logs/example/io",
+    "request_file_pattern": "{run_name}__{attempt}__request.json",
+    "response_file_pattern": "{run_name}__{attempt}__response.json"
+  },
+  "runs": [
+    {
+      "name": "story_teller",
+      "profile_file": "context_files/profiles/python/openai-5/planners/story_teller.json",
+      "provider": "openai",
+      "context_file": [
+        "context_files/general_rules/story_rules.json",
+        "context_files/general_rules/story_example.json"
+      ],
+      "task_description": "Create an application story for a local Library Manager app that stores its data as JSON files on the user's computer. The app will support managing books, members, and book loans. It must enforce business rules to prevent borrowing if a book is out of stock or if a member has exceeded their loan limit, and runs fully offline. The entry point (main.py) wires up dependencies and executes core operations directly. No CLI command parsing, no stdin input.",
+      "target_file": "example/story/story.json"
+    }]}

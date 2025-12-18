@@ -1,0 +1,306 @@
+{
+  "log_io": {
+    "enabled": true,
+    "log_dir": "logs/example/io",
+    "request_file_pattern": "{run_name}__{attempt}__request.json",
+    "response_file_pattern": "{run_name}__{attempt}__response.json"
+  },
+  "runs": [
+    {
+      "name": "main_Main",
+      "profile_file": "context_files/profiles/python/openai-5/coders/py_generator.json",
+      "provider": "openai",
+      "context_file": [
+        "example/manifest/manifest.json",
+        "context_files/general_rules/python_rules.json"
+      ],
+      "task_description": "Generate exactly one Python MODULE FILE at library_manager/main.py. The file must include the imports declared in the manifest for class 'main.Main'. Define exactly one top-level class Main (id 'main.Main') that matches the manifest: the constructor signature, fields, and methods (names and parameters) must match the manifest; include the required imports. Do NOT define any other classes in the file. Do NOT write any other files.",
+      "target_file": "library_manager/main.py"
+    },
+    {
+      "name": "main_Main__validator",
+      "profile_file": "context_files/profiles/python/openai-5/validators/py_validator.json",
+      "provider": "openai",
+      "context_file": [
+        "example/manifest/manifest.json",
+        "context_files/general_rules/python_rules.json",
+        "library_manager/main.py"
+      ],
+      "task_description": "Validate library_manager/main.py against the manifest requirements for class 'main.Main' and the python rules. Decide whether to continue, request strategy change (method refiner/remake), or break.",
+      "target_file": "example/validation/main_Main_validation.json",
+      "rerun_strategy": "example/rerun_strategy/rerun_strategy_class.json",
+      "rerun_methods": ["refiner", "remake"],
+      "target_run": "rerun_main_Main"
+    },
+
+    {
+      "name": "application_Application",
+      "profile_file": "context_files/profiles/python/openai-5/coders/py_generator.json",
+      "provider": "openai",
+      "context_file": [
+        "example/manifest/manifest.json",
+        "context_files/general_rules/python_rules.json"
+      ],
+      "task_description": "Generate exactly one Python MODULE FILE at library_manager/application.py. The file must include the imports declared in the manifest for class 'application.Application'. Define exactly one top-level class Application (id 'application.Application') that matches the manifest: the constructor signature, fields, and methods (names and parameters) must match the manifest; include the required imports. Do NOT define any other classes in the file. Do NOT write any other files.",
+      "target_file": "library_manager/application.py"
+    },
+    {
+      "name": "application_Application__validator",
+      "profile_file": "context_files/profiles/python/openai-5/validators/py_validator.json",
+      "provider": "openai",
+      "context_file": [
+        "example/manifest/manifest.json",
+        "context_files/general_rules/python_rules.json",
+        "library_manager/application.py"
+      ],
+      "task_description": "Validate library_manager/application.py against the manifest requirements for class 'application.Application' and the python rules. Decide whether to continue, request strategy change (method refiner/remake), or break.",
+      "target_file": "example/validation/application_Application_validation.json",
+      "rerun_strategy": "example/rerun_strategy/rerun_strategy_class.json",
+      "rerun_methods": ["refiner", "remake"],
+      "target_run": "rerun_application_Application"
+    },
+
+    {
+      "name": "services_LibraryService",
+      "profile_file": "context_files/profiles/python/openai-5/coders/py_generator.json",
+      "provider": "openai",
+      "context_file": [
+        "example/manifest/manifest.json",
+        "context_files/general_rules/python_rules.json"
+      ],
+      "task_description": "Generate exactly one Python MODULE FILE at library_manager/services/library_service.py. The file must include the imports declared in the manifest for class 'services.LibraryService'. Define exactly one top-level class LibraryService (id 'services.LibraryService') that matches the manifest: the constructor signature, fields, and methods (names and parameters) must match the manifest; include the required imports. Do NOT define any other classes in the file. Do NOT write any other files.",
+      "target_file": "library_manager/services/library_service.py"
+    },
+    {
+      "name": "services_LibraryService__validator",
+      "profile_file": "context_files/profiles/python/openai-5/validators/py_validator.json",
+      "provider": "openai",
+      "context_file": [
+        "example/manifest/manifest.json",
+        "context_files/general_rules/python_rules.json",
+        "library_manager/services/library_service.py"
+      ],
+      "task_description": "Validate library_manager/services/library_service.py against the manifest requirements for class 'services.LibraryService' and the python rules. Decide whether to continue, request strategy change (method refiner/remake), or break.",
+      "target_file": "example/validation/services_LibraryService_validation.json",
+      "rerun_strategy": "example/rerun_strategy/rerun_strategy_class.json",
+      "rerun_methods": ["refiner", "remake"],
+      "target_run": "rerun_services_LibraryService"
+    },
+
+    {
+      "name": "repositories_BookRepository",
+      "profile_file": "context_files/profiles/python/openai-5/coders/py_generator.json",
+      "provider": "openai",
+      "context_file": [
+        "example/manifest/manifest.json",
+        "context_files/general_rules/python_rules.json"
+      ],
+      "task_description": "Generate exactly one Python MODULE FILE at library_manager/repositories/book_repository.py. The file must include the imports declared in the manifest for class 'repositories.BookRepository'. Define exactly one top-level class BookRepository (id 'repositories.BookRepository') that matches the manifest: the constructor signature, fields, and methods (names and parameters) must match the manifest; include the required imports. Do NOT define any other classes in the file. Do NOT write any other files.",
+      "target_file": "library_manager/repositories/book_repository.py"
+    },
+    {
+      "name": "repositories_BookRepository__validator",
+      "profile_file": "context_files/profiles/python/openai-5/validators/py_validator.json",
+      "provider": "openai",
+      "context_file": [
+        "example/manifest/manifest.json",
+        "context_files/general_rules/python_rules.json",
+        "library_manager/repositories/book_repository.py"
+      ],
+      "task_description": "Validate library_manager/repositories/book_repository.py against the manifest requirements for class 'repositories.BookRepository' and the python rules. Decide whether to continue, request strategy change (method refiner/remake), or break.",
+      "target_file": "example/validation/repositories_BookRepository_validation.json",
+      "rerun_strategy": "example/rerun_strategy/rerun_strategy_class.json",
+      "rerun_methods": ["refiner", "remake"],
+      "target_run": "rerun_repositories_BookRepository"
+    },
+
+    {
+      "name": "repositories_MemberRepository",
+      "profile_file": "context_files/profiles/python/openai-5/coders/py_generator.json",
+      "provider": "openai",
+      "context_file": [
+        "example/manifest/manifest.json",
+        "context_files/general_rules/python_rules.json"
+      ],
+      "task_description": "Generate exactly one Python MODULE FILE at library_manager/repositories/member_repository.py. The file must include the imports declared in the manifest for class 'repositories.MemberRepository'. Define exactly one top-level class MemberRepository (id 'repositories.MemberRepository') that matches the manifest: the constructor signature, fields, and methods (names and parameters) must match the manifest; include the required imports. Do NOT define any other classes in the file. Do NOT write any other files.",
+      "target_file": "library_manager/repositories/member_repository.py"
+    },
+    {
+      "name": "repositories_MemberRepository__validator",
+      "profile_file": "context_files/profiles/python/openai-5/validators/py_validator.json",
+      "provider": "openai",
+      "context_file": [
+        "example/manifest/manifest.json",
+        "context_files/general_rules/python_rules.json",
+        "library_manager/repositories/member_repository.py"
+      ],
+      "task_description": "Validate library_manager/repositories/member_repository.py against the manifest requirements for class 'repositories.MemberRepository' and the python rules. Decide whether to continue, request strategy change (method refiner/remake), or break.",
+      "target_file": "example/validation/repositories_MemberRepository_validation.json",
+      "rerun_strategy": "example/rerun_strategy/rerun_strategy_class.json",
+      "rerun_methods": ["refiner", "remake"],
+      "target_run": "rerun_repositories_MemberRepository"
+    },
+
+    {
+      "name": "repositories_LoanRepository",
+      "profile_file": "context_files/profiles/python/openai-5/coders/py_generator.json",
+      "provider": "openai",
+      "context_file": [
+        "example/manifest/manifest.json",
+        "context_files/general_rules/python_rules.json"
+      ],
+      "task_description": "Generate exactly one Python MODULE FILE at library_manager/repositories/loan_repository.py. The file must include the imports declared in the manifest for class 'repositories.LoanRepository'. Define exactly one top-level class LoanRepository (id 'repositories.LoanRepository') that matches the manifest: the constructor signature, fields, and methods (names and parameters) must match the manifest; include the required imports. Do NOT define any other classes in the file. Do NOT write any other files.",
+      "target_file": "library_manager/repositories/loan_repository.py"
+    },
+    {
+      "name": "repositories_LoanRepository__validator",
+      "profile_file": "context_files/profiles/python/openai-5/validators/py_validator.json",
+      "provider": "openai",
+      "context_file": [
+        "example/manifest/manifest.json",
+        "context_files/general_rules/python_rules.json",
+        "library_manager/repositories/loan_repository.py"
+      ],
+      "task_description": "Validate library_manager/repositories/loan_repository.py against the manifest requirements for class 'repositories.LoanRepository' and the python rules. Decide whether to continue, request strategy change (method refiner/remake), or break.",
+      "target_file": "example/validation/repositories_LoanRepository_validation.json",
+      "rerun_strategy": "example/rerun_strategy/rerun_strategy_class.json",
+      "rerun_methods": ["refiner", "remake"],
+      "target_run": "rerun_repositories_LoanRepository"
+    },
+
+    {
+      "name": "storage_JsonStorage",
+      "profile_file": "context_files/profiles/python/openai-5/coders/py_generator.json",
+      "provider": "openai",
+      "context_file": [
+        "example/manifest/manifest.json",
+        "context_files/general_rules/python_rules.json"
+      ],
+      "task_description": "Generate exactly one Python MODULE FILE at library_manager/storage/json_storage.py. The file must include the imports declared in the manifest for class 'storage.JsonStorage'. Define exactly one top-level class JsonStorage (id 'storage.JsonStorage') that matches the manifest: the constructor signature, fields, and methods (names and parameters) must match the manifest; include the required imports. Do NOT define any other classes in the file. Do NOT write any other files.",
+      "target_file": "library_manager/storage/json_storage.py"
+    },
+    {
+      "name": "storage_JsonStorage__validator",
+      "profile_file": "context_files/profiles/python/openai-5/validators/py_validator.json",
+      "provider": "openai",
+      "context_file": [
+        "example/manifest/manifest.json",
+        "context_files/general_rules/python_rules.json",
+        "library_manager/storage/json_storage.py"
+      ],
+      "task_description": "Validate library_manager/storage/json_storage.py against the manifest requirements for class 'storage.JsonStorage' and the python rules. Decide whether to continue, request strategy change (method refiner/remake), or break.",
+      "target_file": "example/validation/storage_JsonStorage_validation.json",
+      "rerun_strategy": "example/rerun_strategy/rerun_strategy_class.json",
+      "rerun_methods": ["refiner", "remake"],
+      "target_run": "rerun_storage_JsonStorage"
+    },
+
+    {
+      "name": "adapters_console_ConsolePrinter",
+      "profile_file": "context_files/profiles/python/openai-5/coders/py_generator.json",
+      "provider": "openai",
+      "context_file": [
+        "example/manifest/manifest.json",
+        "context_files/general_rules/python_rules.json"
+      ],
+      "task_description": "Generate exactly one Python MODULE FILE at library_manager/adapters/console.py. The file must include the imports declared in the manifest for class 'adapters.console.ConsolePrinter'. Define exactly one top-level class ConsolePrinter (id 'adapters.console.ConsolePrinter') that matches the manifest: the constructor signature, fields, and methods (names and parameters) must match the manifest; include the required imports. Do NOT define any other classes in the file. Do NOT write any other files.",
+      "target_file": "library_manager/adapters/console.py"
+    },
+    {
+      "name": "adapters_console_ConsolePrinter__validator",
+      "profile_file": "context_files/profiles/python/openai-5/validators/py_validator.json",
+      "provider": "openai",
+      "context_file": [
+        "example/manifest/manifest.json",
+        "context_files/general_rules/python_rules.json",
+        "library_manager/adapters/console.py"
+      ],
+      "task_description": "Validate library_manager/adapters/console.py against the manifest requirements for class 'adapters.console.ConsolePrinter' and the python rules. Decide whether to continue, request strategy change (method refiner/remake), or break.",
+      "target_file": "example/validation/adapters_console_ConsolePrinter_validation.json",
+      "rerun_strategy": "example/rerun_strategy/rerun_strategy_class.json",
+      "rerun_methods": ["refiner", "remake"],
+      "target_run": "rerun_adapters_console_ConsolePrinter"
+    },
+
+    {
+      "name": "domain_book_Book",
+      "profile_file": "context_files/profiles/python/openai-5/coders/py_generator.json",
+      "provider": "openai",
+      "context_file": [
+        "example/manifest/manifest.json",
+        "context_files/general_rules/python_rules.json"
+      ],
+      "task_description": "Generate exactly one Python MODULE FILE at library_manager/domain/book.py. The file must include the imports declared in the manifest for class 'domain.book.Book'. Define exactly one top-level class Book (id 'domain.book.Book') that matches the manifest: the constructor signature, fields, and methods (names and parameters) must match the manifest; include the required imports. Do NOT define any other classes in the file. Do NOT write any other files.",
+      "target_file": "library_manager/domain/book.py"
+    },
+    {
+      "name": "domain_book_Book__validator",
+      "profile_file": "context_files/profiles/python/openai-5/validators/py_validator.json",
+      "provider": "openai",
+      "context_file": [
+        "example/manifest/manifest.json",
+        "context_files/general_rules/python_rules.json",
+        "library_manager/domain/book.py"
+      ],
+      "task_description": "Validate library_manager/domain/book.py against the manifest requirements for class 'domain.book.Book' and the python rules. Decide whether to continue, request strategy change (method refiner/remake), or break.",
+      "target_file": "example/validation/domain_book_Book_validation.json",
+      "rerun_strategy": "example/rerun_strategy/rerun_strategy_class.json",
+      "rerun_methods": ["refiner", "remake"],
+      "target_run": "rerun_domain_book_Book"
+    },
+
+    {
+      "name": "domain_member_Member",
+      "profile_file": "context_files/profiles/python/openai-5/coders/py_generator.json",
+      "provider": "openai",
+      "context_file": [
+        "example/manifest/manifest.json",
+        "context_files/general_rules/python_rules.json"
+      ],
+      "task_description": "Generate exactly one Python MODULE FILE at library_manager/domain/member.py. The file must include the imports declared in the manifest for class 'domain.member.Member'. Define exactly one top-level class Member (id 'domain.member.Member') that matches the manifest: the constructor signature, fields, and methods (names and parameters) must match the manifest; include the required imports. Do NOT define any other classes in the file. Do NOT write any other files.",
+      "target_file": "library_manager/domain/member.py"
+    },
+    {
+      "name": "domain_member_Member__validator",
+      "profile_file": "context_files/profiles/python/openai-5/validators/py_validator.json",
+      "provider": "openai",
+      "context_file": [
+        "example/manifest/manifest.json",
+        "context_files/general_rules/python_rules.json",
+        "library_manager/domain/member.py"
+      ],
+      "task_description": "Validate library_manager/domain/member.py against the manifest requirements for class 'domain.member.Member' and the python rules. Decide whether to continue, request strategy change (method refiner/remake), or break.",
+      "target_file": "example/validation/domain_member_Member_validation.json",
+      "rerun_strategy": "example/rerun_strategy/rerun_strategy_class.json",
+      "rerun_methods": ["refiner", "remake"],
+      "target_run": "rerun_domain_member_Member"
+    },
+
+    {
+      "name": "domain_loan_Loan",
+      "profile_file": "context_files/profiles/python/openai-5/coders/py_generator.json",
+      "provider": "openai",
+      "context_file": [
+        "example/manifest/manifest.json",
+        "context_files/general_rules/python_rules.json"
+      ],
+      "task_description": "Generate exactly one Python MODULE FILE at library_manager/domain/loan.py. The file must include the imports declared in the manifest for class 'domain.loan.Loan'. Define exactly one top-level class Loan (id 'domain.loan.Loan') that matches the manifest: the constructor signature, fields, and methods (names and parameters) must match the manifest; include the required imports. Do NOT define any other classes in the file. Do NOT write any other files.",
+      "target_file": "library_manager/domain/loan.py"
+    },
+    {
+      "name": "domain_loan_Loan__validator",
+      "profile_file": "context_files/profiles/python/openai-5/validators/py_validator.json",
+      "provider": "openai",
+      "context_file": [
+        "example/manifest/manifest.json",
+        "context_files/general_rules/python_rules.json",
+        "library_manager/domain/loan.py"
+      ],
+      "task_description": "Validate library_manager/domain/loan.py against the manifest requirements for class 'domain.loan.Loan' and the python rules. Decide whether to continue, request strategy change (method refiner/remake), or break.",
+      "target_file": "example/validation/domain_loan_Loan_validation.json",
+      "rerun_strategy": "example/rerun_strategy/rerun_strategy_class.json",
+      "rerun_methods": ["refiner", "remake"],
+      "target_run": "rerun_domain_loan_Loan"
+    }
+  ]
+}

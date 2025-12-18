@@ -1,0 +1,355 @@
+{
+  "blocks": [
+    {
+      "name": "rerun_main_Main",
+      "method": "refiner",
+      "attempts": [
+        {
+          "profile_file": "context_files/profiles/python/openai-5/refactorers/py_refiner.json",
+          "provider": "openai",
+          "context_files": [
+            "library_manager/main.py",
+            "example/manifest/manifest.json",
+            "context_files/general_rules/python_rules.json",
+            "example/validation/main_Main_validation.json"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "rerun_main_Main",
+      "method": "remake",
+      "attempts": [
+        {
+          "profile_file": "context_files/profiles/python/openai-5/coders/py_generator.json",
+          "provider": "openai",
+          "context_files": [
+            "example/manifest/manifest.json",
+            "context_files/general_rules/python_rules.json",
+            "example/validation/main_Main_validation.json"
+          ]
+        }
+      ]
+    },
+
+    {
+      "name": "rerun_application_Application",
+      "method": "refiner",
+      "attempts": [
+        {
+          "profile_file": "context_files/profiles/python/openai-5/refactorers/py_refiner.json",
+          "provider": "openai",
+          "context_files": [
+            "library_manager/application.py",
+            "example/manifest/manifest.json",
+            "context_files/general_rules/python_rules.json",
+            "example/validation/application_Application_validation.json"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "rerun_application_Application",
+      "method": "remake",
+      "attempts": [
+        {
+          "profile_file": "context_files/profiles/python/openai-5/coders/py_generator.json",
+          "provider": "openai",
+          "context_files": [
+            "example/manifest/manifest.json",
+            "context_files/general_rules/python_rules.json",
+            "example/validation/application_Application_validation.json"
+          ]
+        }
+      ]
+    },
+
+    {
+      "name": "rerun_services_LibraryService",
+      "method": "refiner",
+      "attempts": [
+        {
+          "profile_file": "context_files/profiles/python/openai-5/refactorers/py_refiner.json",
+          "provider": "openai",
+          "context_files": [
+            "library_manager/services/library_service.py",
+            "example/manifest/manifest.json",
+            "context_files/general_rules/python_rules.json",
+            "example/validation/services_LibraryService_validation.json"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "rerun_services_LibraryService",
+      "method": "remake",
+      "attempts": [
+        {
+          "profile_file": "context_files/profiles/python/openai-5/coders/py_generator.json",
+          "provider": "openai",
+          "context_files": [
+            "example/manifest/manifest.json",
+            "context_files/general_rules/python_rules.json",
+            "example/validation/services_LibraryService_validation.json"
+          ]
+        }
+      ]
+    },
+
+    {
+      "name": "rerun_repositories_BookRepository",
+      "method": "refiner",
+      "attempts": [
+        {
+          "profile_file": "context_files/profiles/python/openai-5/refactorers/py_refiner.json",
+          "provider": "openai",
+          "context_files": [
+            "library_manager/repositories/book_repository.py",
+            "example/manifest/manifest.json",
+            "context_files/general_rules/python_rules.json",
+            "example/validation/repositories_BookRepository_validation.json"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "rerun_repositories_BookRepository",
+      "method": "remake",
+      "attempts": [
+        {
+          "profile_file": "context_files/profiles/python/openai-5/coders/py_generator.json",
+          "provider": "openai",
+          "context_files": [
+            "example/manifest/manifest.json",
+            "context_files/general_rules/python_rules.json",
+            "example/validation/repositories_BookRepository_validation.json"
+          ]
+        }
+      ]
+    },
+
+    {
+      "name": "rerun_repositories_MemberRepository",
+      "method": "refiner",
+      "attempts": [
+        {
+          "profile_file": "context_files/profiles/python/openai-5/refactorers/py_refiner.json",
+          "provider": "openai",
+          "context_files": [
+            "library_manager/repositories/member_repository.py",
+            "example/manifest/manifest.json",
+            "context_files/general_rules/python_rules.json",
+            "example/validation/repositories_MemberRepository_validation.json"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "rerun_repositories_MemberRepository",
+      "method": "remake",
+      "attempts": [
+        {
+          "profile_file": "context_files/profiles/python/openai-5/coders/py_generator.json",
+          "provider": "openai",
+          "context_files": [
+            "example/manifest/manifest.json",
+            "context_files/general_rules/python_rules.json",
+            "example/validation/repositories_MemberRepository_validation.json"
+          ]
+        }
+      ]
+    },
+
+    {
+      "name": "rerun_repositories_LoanRepository",
+      "method": "refiner",
+      "attempts": [
+        {
+          "profile_file": "context_files/profiles/python/openai-5/refactorers/py_refiner.json",
+          "provider": "openai",
+          "context_files": [
+            "library_manager/repositories/loan_repository.py",
+            "example/manifest/manifest.json",
+            "context_files/general_rules/python_rules.json",
+            "example/validation/repositories_LoanRepository_validation.json"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "rerun_repositories_LoanRepository",
+      "method": "remake",
+      "attempts": [
+        {
+          "profile_file": "context_files/profiles/python/openai-5/coders/py_generator.json",
+          "provider": "openai",
+          "context_files": [
+            "example/manifest/manifest.json",
+            "context_files/general_rules/python_rules.json",
+            "example/validation/repositories_LoanRepository_validation.json"
+          ]
+        }
+      ]
+    },
+
+    {
+      "name": "rerun_storage_JsonStorage",
+      "method": "refiner",
+      "attempts": [
+        {
+          "profile_file": "context_files/profiles/python/openai-5/refactorers/py_refiner.json",
+          "provider": "openai",
+          "context_files": [
+            "library_manager/storage/json_storage.py",
+            "example/manifest/manifest.json",
+            "context_files/general_rules/python_rules.json",
+            "example/validation/storage_JsonStorage_validation.json"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "rerun_storage_JsonStorage",
+      "method": "remake",
+      "attempts": [
+        {
+          "profile_file": "context_files/profiles/python/openai-5/coders/py_generator.json",
+          "provider": "openai",
+          "context_files": [
+            "example/manifest/manifest.json",
+            "context_files/general_rules/python_rules.json",
+            "example/validation/storage_JsonStorage_validation.json"
+          ]
+        }
+      ]
+    },
+
+    {
+      "name": "rerun_adapters_console_ConsolePrinter",
+      "method": "refiner",
+      "attempts": [
+        {
+          "profile_file": "context_files/profiles/python/openai-5/refactorers/py_refiner.json",
+          "provider": "openai",
+          "context_files": [
+            "library_manager/adapters/console.py",
+            "example/manifest/manifest.json",
+            "context_files/general_rules/python_rules.json",
+            "example/validation/adapters_console_ConsolePrinter_validation.json"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "rerun_adapters_console_ConsolePrinter",
+      "method": "remake",
+      "attempts": [
+        {
+          "profile_file": "context_files/profiles/python/openai-5/coders/py_generator.json",
+          "provider": "openai",
+          "context_files": [
+            "example/manifest/manifest.json",
+            "context_files/general_rules/python_rules.json",
+            "example/validation/adapters_console_ConsolePrinter_validation.json"
+          ]
+        }
+      ]
+    },
+
+    {
+      "name": "rerun_domain_book_Book",
+      "method": "refiner",
+      "attempts": [
+        {
+          "profile_file": "context_files/profiles/python/openai-5/refactorers/py_refiner.json",
+          "provider": "openai",
+          "context_files": [
+            "library_manager/domain/book.py",
+            "example/manifest/manifest.json",
+            "context_files/general_rules/python_rules.json",
+            "example/validation/domain_book_Book_validation.json"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "rerun_domain_book_Book",
+      "method": "remake",
+      "attempts": [
+        {
+          "profile_file": "context_files/profiles/python/openai-5/coders/py_generator.json",
+          "provider": "openai",
+          "context_files": [
+            "example/manifest/manifest.json",
+            "context_files/general_rules/python_rules.json",
+            "example/validation/domain_book_Book_validation.json"
+          ]
+        }
+      ]
+    },
+
+    {
+      "name": "rerun_domain_member_Member",
+      "method": "refiner",
+      "attempts": [
+        {
+          "profile_file": "context_files/profiles/python/openai-5/refactorers/py_refiner.json",
+          "provider": "openai",
+          "context_files": [
+            "library_manager/domain/member.py",
+            "example/manifest/manifest.json",
+            "context_files/general_rules/python_rules.json",
+            "example/validation/domain_member_Member_validation.json"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "rerun_domain_member_Member",
+      "method": "remake",
+      "attempts": [
+        {
+          "profile_file": "context_files/profiles/python/openai-5/coders/py_generator.json",
+          "provider": "openai",
+          "context_files": [
+            "example/manifest/manifest.json",
+            "context_files/general_rules/python_rules.json",
+            "example/validation/domain_member_Member_validation.json"
+          ]
+        }
+      ]
+    },
+
+    {
+      "name": "rerun_domain_loan_Loan",
+      "method": "refiner",
+      "attempts": [
+        {
+          "profile_file": "context_files/profiles/python/openai-5/refactorers/py_refiner.json",
+          "provider": "openai",
+          "context_files": [
+            "library_manager/domain/loan.py",
+            "example/manifest/manifest.json",
+            "context_files/general_rules/python_rules.json",
+            "example/validation/domain_loan_Loan_validation.json"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "rerun_domain_loan_Loan",
+      "method": "remake",
+      "attempts": [
+        {
+          "profile_file": "context_files/profiles/python/openai-5/coders/py_generator.json",
+          "provider": "openai",
+          "context_files": [
+            "example/manifest/manifest.json",
+            "context_files/general_rules/python_rules.json",
+            "example/validation/domain_loan_Loan_validation.json"
+          ]
+        }
+      ]
+    }
+  ]
+}

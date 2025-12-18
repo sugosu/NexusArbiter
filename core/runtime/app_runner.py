@@ -1,23 +1,20 @@
 # core/runtime/app_runner.py
 from __future__ import annotations
 
-import json
 import inspect
+import json
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+import core.runtime.response_validation as rv
 from core.actions.base_action import ActionContext, BaseAction
 from core.actions.registry import ActionRegistry
 from core.ai_client.gemini_client import GeminiClient
 from core.ai_client.openai_client import OpenAIClient
 from core.logger import BasicLogger
 
-import core.runtime.response_validation as rv
-
 
 class RunResult:
-    """Returned by AppRunner after a single model call + action execution."""
-
     def __init__(
         self,
         success: bool,
@@ -25,6 +22,8 @@ class RunResult:
         should_break: bool = False,
         change_strategy_requested: bool = False,
         change_strategy_reason: Optional[str] = None,
+        change_strategy_name: Optional[str] = None,
+        change_strategy_method: Optional[str] = None,
         # NOTE: core/app.py expects these fields today (keep for compatibility).
         retry_requested: bool = False,
         retry_reason: Optional[str] = None,
@@ -34,6 +33,8 @@ class RunResult:
         self.should_break = should_break
         self.change_strategy_requested = change_strategy_requested
         self.change_strategy_reason = change_strategy_reason
+        self.change_strategy_name = change_strategy_name
+        self.change_strategy_method = change_strategy_method
         self.retry_requested = retry_requested
         self.retry_reason = retry_reason
 
@@ -77,6 +78,12 @@ class AppRunner:
 
         profile = self._load_profile(profile_file)
         provider = provider_override or profile.get("provider", "openai")
+
+        # Inject rerun-method vocabulary into agent_input (NO strategy file, NO block names).
+        agent_input_overrides = self._inject_rerun_methods_into_agent_input(
+            agent_input_overrides=agent_input_overrides,
+            run_params=run_params,
+        )
 
         request_payload = self._build_request_payload(
             profile=profile,
@@ -163,6 +170,43 @@ class AppRunner:
         if provider == "gemini":
             return GeminiClient(self.logger)
         raise ValueError(f"Unsupported provider '{provider}'")
+
+    # ------------------------------------------------------------------
+    # Agent input injection (rerun method vocabulary)
+    # ------------------------------------------------------------------
+    def _inject_rerun_methods_into_agent_input(
+        self,
+        *,
+        agent_input_overrides: Dict[str, Any],
+        run_params: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """
+        Inject run-level rerun method vocabulary into agent_input so validators can pick
+        a method (e.g. refiner/remake/...) without knowing any strategy block names.
+
+        Resulting agent_input:
+          {
+            ...,
+            "rerun": { "allowed_methods": ["refiner", "remake", ...] }
+          }
+        """
+        overrides = dict(agent_input_overrides or {})
+
+        rerun_methods = run_params.get("rerun_methods")
+        if not isinstance(rerun_methods, list):
+            return overrides
+
+        allowed_methods = [m.strip() for m in rerun_methods if isinstance(m, str) and m.strip()]
+        if not allowed_methods:
+            return overrides
+
+        rerun_obj = overrides.get("rerun")
+        if not isinstance(rerun_obj, dict):
+            rerun_obj = {}
+
+        rerun_obj["allowed_methods"] = allowed_methods
+        overrides["rerun"] = rerun_obj
+        return overrides
 
     # ------------------------------------------------------------------
     # Request payload building
@@ -348,15 +392,18 @@ class AppRunner:
                 )
                 return RunResult(success=False, should_break=True)
 
-            if ctx.should_break:
-                return RunResult(success=True, should_break=True)
-
-            if ctx.change_strategy_requested:
+            # IMPORTANT: Strategy change must short-circuit immediately.
+            if getattr(ctx, "change_strategy_requested", False):
                 return RunResult(
                     success=True,
                     change_strategy_requested=True,
-                    change_strategy_reason=ctx.change_strategy_reason,
+                    change_strategy_reason=getattr(ctx, "change_strategy_reason", None),
+                    change_strategy_name=getattr(ctx, "change_strategy_name", None),
+                    change_strategy_method=getattr(ctx, "change_strategy_method", None),
                 )
+
+            if getattr(ctx, "should_break", False):
+                return RunResult(success=True, should_break=True)
 
         return RunResult(success=True, should_continue=True)
 

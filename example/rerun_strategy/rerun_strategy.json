@@ -1,0 +1,122 @@
+{
+  "blocks": [
+    {
+      "name": "rerun_relationship_refiner",
+      "attempts": [
+        {
+          "profile_file": "context_files/profiles/python/openai-5/refactorers/py_relationship_refiner.json",
+          "provider": "openai",
+          "context_files": [
+            "example/relationship/relationship.json",
+            "context_files/general_rules/relationship_rules.json",
+            "example/validation/relationship_validation.json"
+          ]
+        },
+        {
+          "profile_file": "context_files/profiles/python/openai-5/refactorers/py_relationship_refiner.json",
+          "provider": "openai",
+          "context_files": [
+            "example/relationship/relationship.json",
+            "context_files/general_rules/relationship_rules.json",
+            "example/validation/relationship_validation.json"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "rerun_relationship_remake",
+      "attempts": [
+        {
+          "profile_file": "context_files/profiles/python/openai-5/planners/py_relationship_generator.json",
+          "provider": "openai",
+          "context_files": [
+            "context_files/general_rules/relationship_example.json",
+            "context_files/general_rules/relationship_rules.json",
+            "example/validation/relationship_validation.json"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "rerun_attribution_refiner",
+      "attempts": [
+        {
+          "profile_file": "context_files/profiles/python/openai-5/refactorers/py_attribution_refiner.json",
+          "provider": "openai",
+          "context_files": [
+            "example/relationship/relationship.json",
+            "example/attribution/attributes.json",
+            "context_files/general_rules/attribution_rules.json",
+            "example/validation/attribution_validation.json"
+          ]
+        },
+        {
+          "profile_file": "context_files/profiles/python/openai-5/refactorers/py_attribution_refiner.json",
+          "provider": "openai",
+          "context_files": [
+            "project/relationship/relationship.json",
+            "project/attribution/blueprint.json",
+            "context_files/general_rules/attribution_rules.json",
+            "project/validation/attribution_validation.json"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "rerun_attribution_remake",
+      "attempts": [
+        {
+          "profile_file": "context_files/profiles/python/openai-5/planners/py_attribution_generator.json",
+          "provider": "openai",
+          "context_files": [
+            "example/relationship/relationship.json",
+            "context_files/general_rules/attribution_rules.json",
+            "example/validation/relationship_validation.json"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "rerun_manifest_refiner",
+      "attempts": [
+        {
+          "profile_file": "context_files/profiles/python/openai-5/refactorers/py_manifest_refiner.json",
+          "provider": "openai",
+          "context_files": [
+            "example/relationship/relationship.json",
+            "example/attributes/attributes.json",
+            "example/manifest/manifest.json",
+            "context_files/general_rules/manifest_rules.json",
+            "example/validation/manifest_validation.json"
+          ]
+        },
+        {
+          "profile_file": "context_files/profiles/python/openai-5/refactorers/py_manifest_refiner.json",
+          "provider": "openai",
+          "context_files": [
+            "example/relationship/relationship.json",
+            "example/attributes/attributes.json",
+            "example/manifest/manifest.json",
+            "context_files/general_rules/manifest_rules.json",
+            "example/validation/manifest_validation.json"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "rerun_manifest_remake",
+      "attempts": [
+        {
+          "profile_file": "context_files/profiles/python/openai-5/planners/py_manifest_generator.json",
+          "provider": "openai",
+          "context_files": [
+            "example/relationship/relationship.json",
+            "example/attributes/attributes.json",
+            "context_files/general_rules/manifest_rules.json",
+            "example/validation/relationship_validation.json"
+          ]
+        }
+      ]
+    }
+  ]
+}

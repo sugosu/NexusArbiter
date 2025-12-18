@@ -21,50 +21,34 @@ It proposes a structured and explicit way to interact with AI agents, making it 
 * A valid **API key** for a supported provider (OpenAI or Gemini)
 * Windows, macOS, or Linux
 
-## What Is a Prompt Model?
+## HOW TO USE IT??
 
-A Prompt Model is the complete set of context files required for an AI system to achieve a human-defined goal. It is not a single prompt. It is a structured execution model composed of explicit artifacts.
+* **Step 1**
+* Install python dependencies:
+python -m pip install --upgrade pip
+pip install -r requirements.txt
 
-A Prompt Model consists of five file types:
+* **Step 2**
+Ready your OPENAI-KEY
+https://platform.openai.com/docs/quickstart
 
-1.  **Runs**
-    Define the sequential execution of agents required to reach the target goal.
-2.  **Context Files**
-    Include rules, response schemas, and examples provided to the AI.
-3.  **Profiles**
-    Define agent personas, provider-specific parameters, and generic agent instructions.
-4.  **Target Files**
-    Represent validated outputs produced by agents.
-5.  **Reruns**
-    Define alternative or repeated agent calls that can be executed with the same or different context files when a previous step (typically a validator) requests a retry.
+Export an environment variable on macOS or Linux systems
+On the terminal:
 
-These abstractions are sufficient to model and execute most automation workflows required to achieve complex tasks.
+export OPENAI_API_KEY="your_api_key_here"
 
-## How to Use
+For Windows:
+Create a blank .env file, then create below line 
+OPENAI_API_KEY=PASTEYOURKEYHERE
 
-NexusArbiter follows a **Bring Your Own Key** philosophy and currently supports OpenAI and Gemini. Additional providers will be added.
+* **Step 3**
+Run NexusArbiter: 
+In the root folder, where you have cli.py exists, in the terminal, write:
+run /example/template/template_run.json
 
-### Configure your API key
+This will start your example workflow. Which on default tasked to generate a Library Manager application.
+If you want to change the task, please go to that json and edit the first task description.  
 
-You can set your API key using a `.env` file.
-Or by setting an environment variable directly on Windows.
+* **THATS IT** 
 
-### Prepare a run configuration
-
-Locate a `run.json` file (an example is provided in the repository). Place a simple application idea inside it. The more context you provide, the better the result will be. With the current Prompt Model, NexusArbiter is optimized for small applications.
-
-### Run the workflow
-
-Run the workflow using:
-
-python main.py myproject/run.json
-
-Note: This entry point will be replaced with a packaged CLI in a future release.
-
-While the workflow is running, you can inspect the run.json file and related context files, or ask your AI to explain them.
-
-Output
-
-When execution completes, multiple files will be generated as output.
-
-Enjoy your generated application.
+As your run goes on, you can read the architecture of NexusArbiter. 

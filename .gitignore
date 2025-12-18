@@ -24,3 +24,6 @@ venv/
 /context_files_legacy
 /logs
 /tetris
+/setup_wizard.py
+/merge_py.py
+/nexusarbiter.egg-info

@@ -1,0 +1,23 @@
+{
+  "log_io": {
+    "enabled": true,
+    "log_dir": "logs/example/io",
+    "request_file_pattern": "{run_name}__{attempt}__request.json",
+    "response_file_pattern": "{run_name}__{attempt}__response.json"
+  },
+  "runs": [
+    {
+      "name": "relationship_generator",
+      "profile_file": "context_files/profiles/python/openai-5/planners/py_relationship_generator.json",
+      "provider": "openai",
+
+      "context_file": [
+        "context_files/general_rules/relationship_example.json",
+        "context_files/general_rules/relationship_rules.json"
+      ],
+      "task_description": "Create a Python class relationship model for a local Library Manager app that stores its data as JSON files on the user's computer. The app will support managing books, members, and book loans. It must enforce business rules to prevent borrowing if a book is out of stock or if a member has exceeded their loan limit, and runs fully offline.",
+      "target_file": "example/relationship/relationship.json",
+      "rerun_strategy": null,
+      "rerun_index": 0,
+      "target_run": null
+    }]}

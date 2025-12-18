@@ -18,17 +18,23 @@ class RerunAction(BaseAction):
     # This is what ActionRegistry looks for
     action_type = "rerun"
 
-    def execute(self, ctx: ActionContext, params: Optional[Dict[str, Any]] = None) -> None:
-        # Allow params to be None
-        params = params or {}
-        reason = params.get("reason", "No reason provided")
+class RerunAction(BaseAction):
+    action_type = "rerun"
 
-        # Re-use existing strategy-change flags so pipeline logic stays the same
-        ctx.change_strategy_requested = True
+    def execute(self, ctx: ActionContext, params: Optional[Dict[str, Any]] = None) -> None:
+        params = params or {}
+
+        reason = params.get("reason", "No reason provided")
         ctx.change_strategy_reason = reason
 
-        # Rerun ends this run; pipeline decides what to do next
+        # Existing: optional named block selection (keep if you want)
+        ctx.change_strategy_name = params.get("name") or params.get("block") or params.get("label")
+
+        # NEW: method selection (refiner/remake/etc.)
+        method = params.get("method")
+        if isinstance(method, str) and method.strip():
+            ctx.change_strategy_method = method.strip()
+
+        ctx.change_strategy_requested = True
         ctx.should_continue = False
         ctx.should_break = False
-
-        ctx.logger.info(f"[rerun] Rerun requested: {reason!r}")
