@@ -24,12 +24,18 @@ It proposes a structured and explicit way to interact with AI agents, making it 
 ## HOW TO USE IT??
 
 * **Step 1**
-* Install python dependencies:
-python -m pip install --upgrade pip
+Install python dependencies:
+
+python -m pip install 
+
+--upgrade pip
+
 pip install -r requirements.txt
 
 * **Step 2**
+
 Ready your OPENAI-KEY
+
 https://platform.openai.com/docs/quickstart
 
 Export an environment variable on macOS or Linux systems
@@ -38,17 +44,20 @@ On the terminal:
 export OPENAI_API_KEY="your_api_key_here"
 
 For Windows:
-Create a blank .env file, then create below line 
+Create a blank .env file in the root folder, then create below line 
 OPENAI_API_KEY=PASTEYOURKEYHERE
 
 * **Step 3**
+
 Run NexusArbiter: 
+
 In the root folder, where you have cli.py exists, in the terminal, write:
+
 run /example/template/template_run.json
 
 This will start your example workflow. Which on default tasked to generate a Library Manager application.
 If you want to change the task, please go to that json and edit the first task description.  
 
-* **THATS IT** 
+* **AND THATS IT** 
 
 As your run goes on, you can read the architecture of NexusArbiter. 
