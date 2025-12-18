@@ -1,63 +1,72 @@
+# NexusArbiter
 
-### AI HACK
+**A file-based, deterministic multi-agent framework for structured AI interactions.**
 
- In this repository, there is a file called `merged_all`. It includes all necessary files in this project, along with this README.
- If you provide this file to your own AI and ask it to analyze the contents, the AI can guide you through the entire framework. It takes very little time for it to fully comprehend NexusArbiter.
+NexusArbiter is designed for real-world and enterprise use cases, offering:
 
-### NexusArbiter — Compiled Creativity
+- **Reproducibility** — Consistent outputs from identical inputs
+- **Auditability** — Full transparency into agent decisions
+- **Predictability** — Deterministic behavior you can rely on
+- **Configurability** — Flexible JSON-based workflow definitions
 
-NexusArbiter is a file-based, deterministic multi-agent framework. By design, it is:
+---
 
-* **Reproducible**
-* **Auditable**
-* **Predictable**
-* **Configurable**
+## Quick Start
 
-It proposes a structured and explicit way to interact with AI agents, making it an ideal candidate for real-world and enterprise use cases.
+### Requirements
 
-## Requirements
+- Python 3.10+
+- API key for OpenAI or Gemini
+- Windows, macOS, or Linux
 
-* **Python 3.10** or newer
-* A valid **API key** for a supported provider (OpenAI or Gemini)
-* Windows, macOS, or Linux
+### Installation
 
-## HOW TO USE IT??
+```bash
+# Upgrade pip
+python -m pip install --upgrade pip
 
-* **Step 1**
-Install python dependencies:
-
-python -m pip install 
-
---upgrade pip
-
+# Install dependencies
 pip install -r requirements.txt
+```
 
-* **Step 2**
+### Configuration
 
-Ready your OPENAI-KEY
+Set your OpenAI API key:
 
-https://platform.openai.com/docs/quickstart
-
-Export an environment variable on macOS or Linux systems
-On the terminal:
-
+**macOS / Linux:**
+```bash
 export OPENAI_API_KEY="your_api_key_here"
+```
 
-For Windows:
-Create a blank .env file in the root folder, then create below line 
-OPENAI_API_KEY=PASTEYOURKEYHERE
+**Windows:**
 
-* **Step 3**
+Create a `.env` file in the root folder:
+```
+OPENAI_API_KEY=your_api_key_here
+```
 
-Run NexusArbiter: 
+> Need an API key? See the [OpenAI Quickstart Guide](https://platform.openai.com/docs/quickstart)
 
-In the root folder, where you have cli.py exists, in the terminal, write:
+### Run Your First Workflow
 
-run /example/template/template_run.json
+```bash
+python cli.py run /example/template/template_run.json
+```
 
-This will start your example workflow. Which on default tasked to generate a Library Manager application.
-If you want to change the task, please go to that json and edit the first task description.  
+This launches the example workflow, which generates a Library Manager application by default. To customize the task, edit the first task description in `template_run.json`.
 
-* **AND THATS IT** 
+---
 
-As your run goes on, you can read the architecture of NexusArbiter. 
+## 💡 Tip: AI-Assisted Learning
+
+This repository includes a `merged_all` file containing all project files concatenated together. Feed this file to an AI assistant to get a comprehensive walkthrough of the entire framework in minutes.
+
+---
+
+## Documentation
+
+*Coming soon — explore the `/example` directory for workflow templates and patterns.*
+
+## License
+
+*Add your license here*
