@@ -1,0 +1,29 @@
+{
+  "python_generation_rules": {
+    "command_contract_rules": {
+      "summary": "Define and enforce a clear command contract between entrypoint/orchestration components and downstream handlers/controllers so that parsing logic and handler expectations cannot drift apart.",
+      "rules": [
+        "The shape of any request/command object passed from an entrypoint or orchestration component (e.g., App, HttpApiHost, CliShell) to downstream handlers (e.g., controllers, services) MUST be explicitly defined in a shared specification (story, manifest, or attributes), not invented ad-hoc inside code.",
+        "If a downstream component expects specific keys or structure in the request/command object (for example, a top-level 'action' field plus a 'payload' dict), those keys and their expected structure MUST be documented in the shared specification under a 'command_contract' or equivalent section.",
+        "Parsing logic in entrypoint components (e.g., methods like `_parse_input` or HTTP request mappers) MUST produce request/command objects that conform to the documented contract. They MUST NOT introduce alternative container keys or nested structures that differ from the specification (for example, using 'params' when the contract specifies 'payload').",
+        "Downstream components (controllers/handlers/services) MUST validate incoming request/command objects against the documented contract and treat deviations (missing required keys, wrong container names or types) as validation errors. They MUST NOT rely on undocumented fields.",
+        "Any change to the request/command schema (for example, renaming a field, changing from 'params' to 'payload', or adding new required fields) MUST be introduced by updating the shared specification first. Generated or hand-written code MUST then be regenerated or refactored to match the updated contract.",
+        "For text-based or CLI-driven systems, the mapping from raw input (e.g., user-typed commands) to the structured request/command object MUST be described at least at a high level in the specification. Generators implementing parsing logic MUST follow this mapping and MUST NOT invent incompatible structures.",
+        "When a generator is asked to implement either an entrypoint parser or a downstream handler, it MUST consult the documented command contract in the specification. If the contract is missing, inconsistent, or ambiguous, the generator MUST emit a 'break' action (or equivalent failure) instead of guessing a schema.",
+        "The shared specification (story/manifest/attributes) is the single source of truth for both architectural dependencies AND the request/command contract between layers. Parsing code in entrypoints and validation/processing logic in controllers/handlers MUST both be derived from this same contract, not from independent assumptions."
+      ]
+    },
+        "no_comments_rules": {
+      "summary": "Generated Python code must contain no comments or docstrings; only executable code is permitted.",
+      "rules": [
+        "The generator MUST NOT emit module-level, class-level, or method-level docstrings (no triple-quoted strings).",
+        "The generator MUST NOT emit single-line comments starting with #.",
+        "The generator MUST NOT emit inline comments after code statements.",
+        "The generator MUST NOT emit explanatory string literals that are not part of executable logic (e.g., standalone strings used for documentation).",
+        "If the manifest, story, or attributes contain descriptive text, it MUST be used only to guide code structure and behavior, not copied into the generated source.",
+        "Class and function definitions MUST consist only of valid Python syntax required for execution: imports, signatures, assignments, control flow, and return statements.",
+        "If omitting comments or docstrings would make behavior unclear, the generator MUST rely solely on clear naming and structure rather than emitting commentary."
+      ]
+    }
+  }
+}

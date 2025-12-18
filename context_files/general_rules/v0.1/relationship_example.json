@@ -1,0 +1,180 @@
+{
+  "classes": [
+    {
+      "id": "core.app.App",
+      "file_path": "core/app.py",
+      "class_name": "App",
+      "role": "orchestration",
+      "purpose": "Top-level CLI orchestration. Parses command-line arguments and delegates to the TodoController.",
+      "depends_on": [
+        "core.logging.AppLogger",
+        "core.controller.TodoController"
+      ],
+      "used_by": [],
+      "interactions": [
+        {
+          "target_id": "core.logging.AppLogger",
+          "interaction_method": "info/error",
+          "interaction_way": "App receives logger via constructor and logs lifecycle events and fatal errors.",
+          "semantics": "Observability for application startup, shutdown, and unexpected failures."
+        },
+        {
+          "target_id": "core.controller.TodoController",
+          "interaction_method": "run_main_flow(command, path)",
+          "interaction_way": "App parses CLI args into a Command object and a storage path, then calls controller.run_main_flow(command, path).",
+          "semantics": "Delegates all TODO-specific behavior to the controller and passes the storage path as a method-level parameter."
+        }
+      ],
+      "notes": [
+        "App should not perform domain logic.",
+        "No file I/O or repository calls in App; it only orchestrates and provides the storage path to the controller."
+      ]
+    },
+    {
+      "id": "core.controller.TodoController",
+      "file_path": "core/controller.py",
+      "class_name": "TodoController",
+      "role": "domain_orchestrator",
+      "purpose": "Interpret user commands and coordinate TodoService operations and user-visible output.",
+      "depends_on": [
+        "core.logging.AppLogger",
+        "core.service.TodoService"
+      ],
+      "used_by": [
+        "core.app.App"
+      ],
+      "interactions": [
+        {
+          "target_id": "core.logging.AppLogger",
+          "interaction_method": "info/warning/error",
+          "interaction_way": "Logs each high-level command and any validation or service errors.",
+          "semantics": "High-level trace of user interactions and failures."
+        },
+        {
+          "target_id": "core.service.TodoService",
+          "interaction_method": "list_todos(path)/add_todo(todo, path)/complete_todo(todo_id, path)/delete_todo(todo_id, path)",
+          "interaction_way": "Maps parsed user commands to corresponding service methods, always passing the current storage path as a method-level argument.",
+          "semantics": "Controller contains no persistence logic; it uses TodoService exclusively for domain operations and passes the storage path for each call."
+        }
+      ],
+      "notes": [
+        "Controller should not talk directly to repository or storage.",
+        "Responsible for mapping domain errors to user-visible messages or exit codes.",
+        "Storage path is treated as a method parameter and forwarded to the service; no hidden config dependencies are introduced."
+      ]
+    },
+    {
+      "id": "core.service.TodoService",
+      "file_path": "core/service.py",
+      "class_name": "TodoService",
+      "role": "domain_service",
+      "purpose": "Encapsulate TODO domain logic: create, retrieve, update, and delete TODO items, enforcing basic invariants.",
+      "depends_on": [
+        "core.logging.AppLogger",
+        "core.repository.TodoRepository"
+      ],
+      "used_by": [
+        "core.controller.TodoController"
+      ],
+      "interactions": [
+        {
+          "target_id": "core.logging.AppLogger",
+          "interaction_method": "debug/info/error",
+          "interaction_way": "Logs detailed domain events such as number of todos loaded, saved, or filtered.",
+          "semantics": "Fine-grained observability for domain operations."
+        },
+        {
+          "target_id": "core.repository.TodoRepository",
+          "interaction_method": "load_all(path)/save_all(path, todos)",
+          "interaction_way": "Service retrieves and persists lists of Todo entities through repository APIs, passing the storage path as a method-level parameter on each call.",
+          "semantics": "All persistence goes through repository; no direct file I/O here. Service owns the path argument at method level and forwards it to the repository."
+        }
+      ],
+      "notes": [
+        "Responsible for ensuring non-empty titles, id uniqueness, and basic validation.",
+        "Repository returns and accepts domain models, not raw dictionaries.",
+        "Path ownership is explicit: service methods receive 'path' from the controller and pass it to the repository methods as a parameter."
+      ]
+    },
+    {
+      "id": "core.repository.TodoRepository",
+      "file_path": "core/repository.py",
+      "class_name": "TodoRepository",
+      "role": "repository",
+      "purpose": "Provide a persistence abstraction over a collection of Todo entities, independent of storage details.",
+      "depends_on": [
+        "core.logging.AppLogger",
+        "core.storage.JsonStorage"
+      ],
+      "used_by": [
+        "core.service.TodoService"
+      ],
+      "interactions": [
+        {
+          "target_id": "core.logging.AppLogger",
+          "interaction_method": "debug/error",
+          "interaction_way": "Logs low-level persistence operations and failures (e.g. file not found, corrupt data).",
+          "semantics": "Useful for diagnosing storage-level issues."
+        },
+        {
+          "target_id": "core.storage.JsonStorage",
+          "interaction_method": "read(path)/write(path, data)",
+          "interaction_way": "Calls storage.read(path) to obtain raw data and storage.write(path, data) to persist, using the 'path' parameter provided by service methods.",
+          "semantics": "Repository adapts between domain models and serialized JSON data. Storage path is passed as a method argument; repository does not own path as state."
+        }
+      ],
+      "notes": [
+        "Responsible for mapping between raw JSON and Todo domain objects.",
+        "Does not know about CLI or user interaction.",
+        "Follows method-level path ownership: every public repository method that interacts with storage receives 'path' as a parameter instead of storing it as a field."
+      ]
+    },
+    {
+      "id": "core.storage.JsonStorage",
+      "file_path": "core/storage.py",
+      "class_name": "JsonStorage",
+      "role": "storage_adapter",
+      "purpose": "Low-level JSON file storage adapter for TODO data.",
+      "depends_on": [
+        "core.logging.AppLogger"
+      ],
+      "used_by": [
+        "core.repository.TodoRepository"
+      ],
+      "interactions": [
+        {
+          "target_id": "core.logging.AppLogger",
+          "interaction_method": "debug/error",
+          "interaction_way": "Logs file paths, read/write operations, and I/O errors.",
+          "semantics": "I/O-level observability."
+        }
+      ],
+      "notes": [
+        "Responsible only for bytes/JSON I/O with the filesystem.",
+        "No domain knowledge; it deals with generic JSON-serializable structures.",
+        "Path ownership is external: callers (repository) always pass 'path' explicitly; JsonStorage does not store or decide paths."
+      ]
+    },
+    {
+      "id": "core.logging.AppLogger",
+      "file_path": "core/logging.py",
+      "class_name": "AppLogger",
+      "role": "logging_adapter",
+      "purpose": "Application-level logging wrapper around Python's logging, with convenience methods for this app.",
+      "depends_on": [],
+      "used_by": [
+        "core.app.App",
+        "core.controller.TodoController",
+        "core.service.TodoService",
+        "core.repository.TodoRepository",
+        "core.storage.JsonStorage"
+      ],
+      "interactions": [],
+      "notes": [
+        "Provides info/debug/error APIs bound to configured logger instances.",
+        "May encapsulate configuration of logging formatters and handlers.",
+        "Does not know or care about path ownership; it just logs messages."
+      ]
+    }
+  ]
+}

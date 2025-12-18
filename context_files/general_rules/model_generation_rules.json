@@ -1,0 +1,50 @@
+{
+  "rules_version": "1.0",
+  "description": "Rules for generating Python domain models (dataclasses and enums) inside NexusArbiter.",
+
+  "style": {
+    "require_dataclass_decorator": true,
+    "require_enum_base": "Enum",
+    "allow_docstrings": true,
+    "allow_comments": false,
+    "max_line_length": 120
+  },
+
+  "typing_rules": {
+    "map_string_to_python": {
+      "string": "str",
+      "int": "int",
+      "decimal": "Decimal",
+      "bool": "bool",
+      "float": "float"
+    },
+    "generic_mappings": {
+      "list<T>": "List[T]",
+      "map<K,V>": "Dict[K, V]",
+      "T|null": "Optional[T]"
+    },
+    "required_imports": [
+      "from dataclasses import dataclass",
+      "from enum import Enum",
+      "from typing import List, Dict, Optional",
+      "from decimal import Decimal"
+    ]
+  },
+
+  "model_structure": {
+    "allowed_kinds": ["dataclass", "enum"],
+    "ordering": [
+      "enums_first",
+      "simple_dataclasses",
+      "aggregate_dataclasses"
+    ],
+    "allow_forward_references": true
+  },
+
+  "validation": {
+    "must_define_all_data_structures_in_manifest": true,
+    "must_not_add_extra_models": true,
+    "must_match_field_names": true,
+    "must_match_field_types": true
+  }
+}

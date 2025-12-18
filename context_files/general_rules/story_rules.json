@@ -1,0 +1,41 @@
+{
+  "implementation_story_rules": {
+    "mode_requirement": "strict",
+    "structure": [
+      "App Story",
+      "Entry Point"
+    ],
+    "section_rules": {
+      "app_story": [
+        "Must be exactly one paragraph.",
+        "Describe only: what the app does, the minimal entities involved (if any), and that data persists locally (if applicable).",
+        "No internal design, no components, no class/module/function mentions."
+      ],
+"entry_point": [
+  "Must include: program name and how to run it (e.g., python main.py).",
+  "Describe the basic input/output behavior.",
+  "Keep it minimal and deterministic.",
+  "Do NOT describe CLI commands, stdin input, or interactive behavior unless explicitly required by the task description."
+]
+    },
+    "hard_prohibitions": [
+      "No markdown fences or code blocks.",
+      "No programming language syntax.",
+      "No class names, module names, method/function signatures.",
+      "No advanced features (auth, sync, plugins, UI, multi-user) unless explicitly required by the task description.",
+      "No CLI argument parsing complexity (flags, options, subcommands) unless explicitly required."
+    ],
+    "style_constraints": [
+      "Be concise and practical.",
+      "Avoid speculative language (may/could/might).",
+      "Avoid examples beyond basic usage."
+    ],
+    "example_handling_rules": [
+      "Any examples provided in context are FORMAT EXAMPLES ONLY.",
+      "You MUST NOT copy example-specific domain content, entities, or workflows unless explicitly required by the current TASK DESCRIPTION.",
+      "You MUST generate fresh content tailored to the current TASK DESCRIPTION.",
+      "If an example conflicts with the current TASK DESCRIPTION, the TASK DESCRIPTION always wins.",
+      "If the TASK DESCRIPTION is generic, choose neutral, generic naming derived from the task itself."
+    ]
+  }
+}
