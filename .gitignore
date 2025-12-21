@@ -25,3 +25,6 @@ merged_all.txt
 /merge_py.py
 /nexusarbiter.egg-info
 /helper
+/context_files/
+/context_files_friday
+.gitignore
