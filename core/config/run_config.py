@@ -34,7 +34,7 @@ class LogIOSettings:
 @dataclass
 class RunItem:
     name: str
-    profile_file: str
+    profile_file: Optional[str]
     task_description: Optional[str]
     context_file: List[str]
     target_file: Optional[str]
@@ -44,7 +44,6 @@ class RunItem:
     rerun_index: Optional[int] = None
     target_run: Optional[str] = None
     rerun_strategy: Optional[str] = None
-
 
     # Optional per-run I/O logging overrides
     log_io_override: Optional[Dict[str, Any]] = None
@@ -61,11 +60,11 @@ class RunItem:
 
 
 @dataclass(frozen=True)
-class IncludeRun:
-    include_run: str
+class IncludeRuns:
+    include_runs: List[str]
 
 
-RunStep = Union[RunItem, IncludeRun]
+RunStep = Union[RunItem, IncludeRuns]
 
 
 @dataclass
@@ -93,33 +92,65 @@ class RunConfig:
             raise ValueError("'runs' must be a list.")
 
         runs: List[RunStep] = []
+
+        # Fields that belong only to agent runs (LLM steps)
+        agent_fields = {
+            "profile_file",
+            "provider",
+            "context_file",
+            "task_description",
+            "target_file",
+            "allowed_actions",
+            "rerun_index",
+            "target_run",
+            "rerun_strategy",
+            "log_io",
+            "rerun_methods",
+        }
+
         for idx, obj in enumerate(runs_raw):
             if not isinstance(obj, dict):
                 raise ValueError(f"runs[{idx}] must be an object.")
 
-            # include_run step
-            if "include_run" in obj:
-                include_val = obj.get("include_run")
-                if not isinstance(include_val, str) or not include_val.strip():
-                    raise ValueError(f"runs[{idx}].include_run must be a non-empty string.")
-
-                # enforce mutual exclusivity (schema stays the same; error earlier)
-                forbidden = [k for k in ("profile_file", "context_file", "target_file", "allowed_actions") if k in obj]
-                if forbidden:
+            # ---- include_run / include_runs step ----
+            if "include_run" in obj or "include_runs" in obj:
+                if "include_run" in obj and "include_runs" in obj:
                     raise ValueError(
-                        f"runs[{idx}] include_run step must not include agent fields: {forbidden}."
+                        f"runs[{idx}] must not specify both 'include_run' and 'include_runs'."
                     )
 
-                runs.append(IncludeRun(include_run=include_val))
+                # forbid agent fields on include steps
+                forbidden = [k for k in agent_fields if k in obj and k not in ("name",)]
+                # (name is allowed for nicer logs)
+                if forbidden:
+                    raise ValueError(
+                        f"runs[{idx}] include step must not include agent fields: {sorted(forbidden)}."
+                    )
+
+                if "include_run" in obj:
+                    include_val = obj.get("include_run")
+                    if not isinstance(include_val, str) or not include_val.strip():
+                        raise ValueError(f"runs[{idx}].include_run must be a non-empty string.")
+                    include_list = [include_val.strip()]
+                else:
+                    include_vals = obj.get("include_runs")
+                    if not isinstance(include_vals, list) or not include_vals:
+                        raise ValueError(f"runs[{idx}].include_runs must be a non-empty list of strings.")
+                    include_list = []
+                    for j, x in enumerate(include_vals):
+                        if not isinstance(x, str) or not x.strip():
+                            raise ValueError(f"runs[{idx}].include_runs[{j}] must be a non-empty string.")
+                        include_list.append(x.strip())
+
+                runs.append(IncludeRuns(include_runs=include_list))
                 continue
 
-            # agent step
+            # ---- agent (LLM) step ----
             if "profile_file" not in obj:
                 raise ValueError(f"runs[{idx}] missing required field 'profile_file'.")
 
             rerun_index = obj.get("rerun_index")
             rerun_strategy = obj.get("rerun_strategy")
-
 
             context_file = obj.get("context_file", [])
             if context_file is None:
@@ -146,7 +177,7 @@ class RunConfig:
                     rerun_index=rerun_index,
                     target_run=obj.get("target_run"),
                     rerun_strategy=rerun_strategy,
-                    log_io_override=obj.get("log_io")
+                    log_io_override=obj.get("log_io"),
                 )
             )
 

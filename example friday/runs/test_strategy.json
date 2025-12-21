@@ -1,0 +1,20 @@
+{
+  "log_io": {
+    "enabled": true,
+    "log_dir": "logs/example/io",
+    "request_file_pattern": "{run_name}__{attempt}__request.json",
+    "response_file_pattern": "{run_name}__{attempt}__response.json"
+  },
+  "runs": [
+        {
+      "name": "strategy_maker",
+      "profile_file": "context_files/profiles/python/openai-5/planners/py_strategy_maker.json",
+      "context_file": [
+        "example/runs/class_runs.json",
+        "example/manifest/manifest.json"
+      ],
+      "task_description": "Generate rerun_strategy_class.json in the blocks/attempts schema for all class generator runs found in runs_class.json. For each target_run, emit (refiner) block with 2 identical attempts using py_refiner.json and context_files [manifest, class_file, validation_report, python_rules], and (remake) block with 1 attempt using py_generator.json and context_files copied from the original generator run.",
+      "target_file": "example/rerun_strategy/rerun_strategy_class2.json"
+    }
+  ]
+}

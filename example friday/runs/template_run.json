@@ -1,0 +1,126 @@
+{
+  "log_io": {
+    "enabled": true,
+    "log_dir": "logs/example/io",
+    "request_file_pattern": "{run_name}__{attempt}__request.json",
+    "response_file_pattern": "{run_name}__{attempt}__response.json"
+  },
+  "runs": [
+    {
+      "name": "story_teller",
+      "profile_file": "context_files/profiles/python/openai-5/planners/story_teller.json",
+      "context_file": [
+        "context_files/general_rules/story_rules.json",
+        "context_files/general_rules/story_example.json"
+      ],
+      "task_description": "Create an application story for a local Library Manager app that stores its data as JSON files on the user's computer. The app will support managing books, members, and book loans. It must enforce business rules to prevent borrowing if a book is out of stock or if a member has exceeded their loan limit, and runs fully offline.",
+      "target_file": "example/story/story.json"
+    },
+    {
+      "name": "relationship_generator",
+      "profile_file": "context_files/profiles/python/openai-5/planners/py_relationship_generator.json",
+      "context_file": [
+        "context_files/general_rules/relationship_example.json",
+        "context_files/general_rules/relationship_rules.json",
+        "example/story/story.json"
+      ],
+      "task_description": "Create a Python class relationship model from provided story.",
+      "target_file": "example/relationship/relationship.json"
+    },
+
+    {
+      "name": "relationship_validator",
+      "profile_file": "context_files/profiles/python/openai-5/validators/py_relationship_validator.json",
+      "context_file": [
+        "example/relationship/relationship.json",
+        "context_files/general_rules/relationship_example.json",
+        "context_files/general_rules/relationship_rules.json"
+      ],
+      "task_description": "Validate the generated relationship.json against the expected relationship example/schema and decide whether to continue, rerun, or break.",
+      "target_file": "example/validation/relationship_validation.json",
+
+      "rerun_strategy": "example/rerun_strategy/rerun_strategy.json",
+      "rerun_methods": ["refiner", "remake"],
+      "target_run": "relationship_generator"
+    },
+
+    {
+      "name": "attribution_generator",
+      "profile_file": "context_files/profiles/python/openai-5/planners/py_attribution_generator.json",
+      "context_file": [
+        "example/relationship/relationship.json",
+        "context_files/general_rules/attribution_rules.json"
+      ],
+      "task_description": "Generate Python class blueprints (imports, fields, constructors, methods, notes) for all classes defined in the provided relationship.json context.",
+      "target_file": "example/attributes/attributes.json"
+    },
+
+    {
+      "name": "attribution_validator",
+      "profile_file": "context_files/profiles/python/openai-5/validators/py_attribution_validator.json",
+      "context_file": [
+        "example/attributes/attributes.json",
+        "example/relationship/relationship.json",
+        "context_files/general_rules/attribution_rules.json"
+      ],
+      "task_description": "Validate the generated attribution/blueprint JSON against the expected attribution example/schema and decide whether to continue, rerun, or break.",
+      "target_file": "example/validation/attribution_validation.json",
+
+      "rerun_strategy": "example/rerun_strategy/rerun_strategy.json",
+      "rerun_methods": ["refiner", "remake"],
+      "target_run": "attribution_generator"
+    },
+
+    {
+      "name": "manifest_generator",
+      "profile_file": "context_files/profiles/python/openai-5/planners/py_manifest_generator.json",
+      "context_file": [
+        "example/relationship/relationship.json",
+        "example/attributes/attributes.json",
+        "context_files/general_rules/manifest_rules.json",
+        "context_files/general_rules/manifest_example.json"
+      ],
+      "task_description": "Generate a complete manifest.json for the context provided by relationship.json and attributes.json as the architectural sources of truth.",
+      "target_file": "example/manifest/manifest.json"
+    },
+
+    {
+      "name": "manifest_validator",
+      "profile_file": "context_files/profiles/python/openai-5/validators/py_manifest_validator.json",
+      "context_file": [
+        "example/manifest/manifest.json",
+        "context_files/general_rules/manifest_rules.json"
+      ],
+      "task_description": "Validate the generated manifest.json against the expected manifest example/schema and decide whether to continue, rerun, or break.",
+      "target_file": "example/validation/manifest_validation.json",
+
+      "rerun_strategy": "example/rerun_strategy/rerun_strategy.json",
+      "rerun_methods": ["refiner", "remake"],
+      "target_run": "manifest_generator"
+    },
+
+    {
+      "name": "py_run_generator",
+      "profile_file": "context_files/profiles/python/openai-5/planners/py_run_generator.json",
+      "context_file": [
+        "example/manifest/manifest.json",
+        "context_files/general_rules/run_generator_rules.json"
+      ],
+      "task_description": "Generate a runs.json file that contains one run per Python class defined in the provided manifest.json. Each run must target exactly one class and write to project_name/<class.file_path>. Use only the manifest as the architectural source of truth.",
+      "target_file": "example/runs/class_runs.json"
+    },
+            {
+      "name": "strategy_maker",
+      "profile_file": "context_files/profiles/python/openai-5/planners/py_strategy_maker.json",
+      "context_file": [
+        "example/runs/class_runs.json",
+        "example/manifest/manifest.json"
+      ],
+      "task_description": "Generate rerun_strategy_class.json in the blocks/attempts schema for all class generator runs found in runs_class.json. For each target_run, emit (refiner) block with 2 identical attempts using py_refiner.json and context_files [manifest, class_file, validation_report, python_rules], and (remake) block with 1 attempt using py_generator.json and context_files copied from the original generator run.",
+      "target_file": "example/rerun_strategy/rerun_strategy_class.json"
+    },
+{
+  "include_runs": ["example/runs/class_runs.json"]
+}    
+  ]
+}

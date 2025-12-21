@@ -13,6 +13,7 @@ class RerunAttempt:
     profile_file: str
     provider: Optional[str] = None
     context_files: List[str] = field(default_factory=list)
+    target_file: Optional[str] = None
 
     @staticmethod
     def from_dict(data: Dict[str, Any]) -> "RerunAttempt":

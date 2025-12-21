@@ -1,0 +1,226 @@
+{
+  "log_io": {
+    "enabled": true,
+    "log_dir": "logs/example/io",
+    "request_file_pattern": "{run_name}__{attempt}__request.json",
+    "response_file_pattern": "{run_name}__{attempt}__response.json"
+  },
+  "runs": [
+    {
+      "name": "main_Main",
+      "profile_file": "context_files/profiles/python/openai-5/coders/py_generator.json",
+      "context_file": [
+        "example/manifest/manifest.json",
+        "context_files/general_rules/python_rules.json"
+      ],
+      "task_description": "Generate exactly one Python MODULE FILE at the target path \"library_manager/main.py\". The file MUST include the required imports declared in the manifest. The file MUST define exactly ONE top-level class with id \"main.Main\". The class MUST match the manifest: constructor signature, fields, methods, and imports as declared. Do NOT define any other classes in that file. Do NOT write any other files.",
+      "target_file": "library_manager/main.py"
+    },
+    {
+      "name": "main_Main__validator",
+      "profile_file": "context_files/profiles/python/openai-5/validators/py_validator.json",
+      "context_file": [
+        "example/manifest/manifest.json",
+        "library_manager/main.py",
+        "context_files/general_rules/python_rules.json"
+      ],
+      "task_description": "Validate the implementation at \"library_manager/main.py\" against the manifest (example/manifest/manifest.json) and the provided rules. Produce a validation report describing whether the file implements the class \"main.Main\" exactly as declared (constructor signature, fields, methods, and imports). Decide and state whether to: continue, rerun using one of the rerun methods (refiner or remake), or break. Provide explicit findings and suggested action.",
+      "target_file": "example/validation/main_Main_validation.json",
+      "rerun_strategy": "example/rerun_strategy/rerun_strategy_class.json",
+      "rerun_methods": [
+        "refiner",
+        "remake"
+      ],
+      "target_run": "main_Main"
+    },
+    {
+      "name": "library_app_LibraryApp",
+      "profile_file": "context_files/profiles/python/openai-5/coders/py_generator.json",
+      "context_file": [
+        "example/manifest/manifest.json",
+        "context_files/general_rules/python_rules.json"
+      ],
+      "task_description": "Generate exactly one Python MODULE FILE at the target path \"library_manager/library/app.py\". The file MUST include the required imports declared in the manifest. The file MUST define exactly ONE top-level class with id \"library.app.LibraryApp\". The class MUST match the manifest: constructor signature, fields, methods, and imports as declared. Do NOT define any other classes in that file. Do NOT write any other files.",
+      "target_file": "library_manager/library/app.py"
+    },
+    {
+      "name": "library_app_LibraryApp__validator",
+      "profile_file": "context_files/profiles/python/openai-5/validators/py_validator.json",
+      "context_file": [
+        "example/manifest/manifest.json",
+        "library_manager/library/app.py",
+        "context_files/general_rules/python_rules.json"
+      ],
+      "task_description": "Validate the implementation at \"library_manager/library/app.py\" against the manifest (example/manifest/manifest.json) and the provided rules. Produce a validation report describing whether the file implements the class \"library.app.LibraryApp\" exactly as declared (constructor signature, fields, methods, and imports). Decide and state whether to: continue, rerun using one of the rerun methods (refiner or remake), or break. Provide explicit findings and suggested action.",
+      "target_file": "example/validation/library_app_LibraryApp_validation.json",
+      "rerun_strategy": "example/rerun_strategy/rerun_strategy_class.json",
+      "rerun_methods": [
+        "refiner",
+        "remake"
+      ],
+      "target_run": "library_app_LibraryApp"
+    },
+    {
+      "name": "library_service_LibraryService",
+      "profile_file": "context_files/profiles/python/openai-5/coders/py_generator.json",
+      "context_file": [
+        "example/manifest/manifest.json",
+        "context_files/general_rules/python_rules.json"
+      ],
+      "task_description": "Generate exactly one Python MODULE FILE at the target path \"library_manager/library/service.py\". The file MUST include the required imports declared in the manifest. The file MUST define exactly ONE top-level class with id \"library.service.LibraryService\". The class MUST match the manifest: constructor signature, fields, methods, and imports as declared. Do NOT define any other classes in that file. Do NOT write any other files.",
+      "target_file": "library_manager/library/service.py"
+    },
+    {
+      "name": "library_service_LibraryService__validator",
+      "profile_file": "context_files/profiles/python/openai-5/validators/py_validator.json",
+      "context_file": [
+        "example/manifest/manifest.json",
+        "library_manager/library/service.py",
+        "context_files/general_rules/python_rules.json"
+      ],
+      "task_description": "Validate the implementation at \"library_manager/library/service.py\" against the manifest (example/manifest/manifest.json) and the provided rules. Produce a validation report describing whether the file implements the class \"library.service.LibraryService\" exactly as declared (constructor signature, fields, methods, and imports). Decide and state whether to: continue, rerun using one of the rerun methods (refiner or remake), or break. Provide explicit findings and suggested action.",
+      "target_file": "example/validation/library_service_LibraryService_validation.json",
+      "rerun_strategy": "example/rerun_strategy/rerun_strategy_class.json",
+      "rerun_methods": [
+        "refiner",
+        "remake"
+      ],
+      "target_run": "library_service_LibraryService"
+    },
+    {
+      "name": "library_repository_BookRepository",
+      "profile_file": "context_files/profiles/python/openai-5/coders/py_generator.json",
+      "context_file": [
+        "example/manifest/manifest.json",
+        "context_files/general_rules/python_rules.json"
+      ],
+      "task_description": "Generate exactly one Python MODULE FILE at the target path \"library_manager/library/repository.py\". The file MUST include the required imports declared in the manifest. The file MUST define exactly ONE top-level class with id \"library.repository.BookRepository\". The class MUST match the manifest: constructor signature, fields, methods, and imports as declared. Do NOT define any other classes in that file. Do NOT write any other files.",
+      "target_file": "library_manager/library/repository.py"
+    },
+    {
+      "name": "library_repository_BookRepository__validator",
+      "profile_file": "context_files/profiles/python/openai-5/validators/py_validator.json",
+      "context_file": [
+        "example/manifest/manifest.json",
+        "library_manager/library/repository.py",
+        "context_files/general_rules/python_rules.json"
+      ],
+      "task_description": "Validate the implementation at \"library_manager/library/repository.py\" against the manifest (example/manifest/manifest.json) and the provided rules. Produce a validation report describing whether the file implements the class \"library.repository.BookRepository\" exactly as declared (constructor signature, fields, methods, and imports). Decide and state whether to: continue, rerun using one of the rerun methods (refiner or remake), or break. Provide explicit findings and suggested action.",
+      "target_file": "example/validation/library_repository_BookRepository_validation.json",
+      "rerun_strategy": "example/rerun_strategy/rerun_strategy_class.json",
+      "rerun_methods": [
+        "refiner",
+        "remake"
+      ],
+      "target_run": "library_repository_BookRepository"
+    },
+    {
+      "name": "library_repository_MemberRepository",
+      "profile_file": "context_files/profiles/python/openai-5/coders/py_generator.json",
+      "context_file": [
+        "example/manifest/manifest.json",
+        "context_files/general_rules/python_rules.json"
+      ],
+      "task_description": "Generate exactly one Python MODULE FILE at the target path \"library_manager/library/repository.py\". The file MUST include the required imports declared in the manifest. The file MUST define exactly ONE top-level class with id \"library.repository.MemberRepository\". The class MUST match the manifest: constructor signature, fields, methods, and imports as declared. Do NOT define any other classes in that file. Do NOT write any other files.",
+      "target_file": "library_manager/library/repository.py"
+    },
+    {
+      "name": "library_repository_MemberRepository__validator",
+      "profile_file": "context_files/profiles/python/openai-5/validators/py_validator.json",
+      "context_file": [
+        "example/manifest/manifest.json",
+        "library_manager/library/repository.py",
+        "context_files/general_rules/python_rules.json"
+      ],
+      "task_description": "Validate the implementation at \"library_manager/library/repository.py\" against the manifest (example/manifest/manifest.json) and the provided rules. Produce a validation report describing whether the file implements the class \"library.repository.MemberRepository\" exactly as declared (constructor signature, fields, methods, and imports). Decide and state whether to: continue, rerun using one of the rerun methods (refiner or remake), or break. Provide explicit findings and suggested action.",
+      "target_file": "example/validation/library_repository_MemberRepository_validation.json",
+      "rerun_strategy": "example/rerun_strategy/rerun_strategy_class.json",
+      "rerun_methods": [
+        "refiner",
+        "remake"
+      ],
+      "target_run": "library_repository_MemberRepository"
+    },
+    {
+      "name": "library_repository_LoanRepository",
+      "profile_file": "context_files/profiles/python/openai-5/coders/py_generator.json",
+      "context_file": [
+        "example/manifest/manifest.json",
+        "context_files/general_rules/python_rules.json"
+      ],
+      "task_description": "Generate exactly one Python MODULE FILE at the target path \"library_manager/library/repository.py\". The file MUST include the required imports declared in the manifest. The file MUST define exactly ONE top-level class with id \"library.repository.LoanRepository\". The class MUST match the manifest: constructor signature, fields, methods, and imports as declared. Do NOT define any other classes in that file. Do NOT write any other files.",
+      "target_file": "library_manager/library/repository.py"
+    },
+    {
+      "name": "library_repository_LoanRepository__validator",
+      "profile_file": "context_files/profiles/python/openai-5/validators/py_validator.json",
+      "context_file": [
+        "example/manifest/manifest.json",
+        "library_manager/library/repository.py",
+        "context_files/general_rules/python_rules.json"
+      ],
+      "task_description": "Validate the implementation at \"library_manager/library/repository.py\" against the manifest (example/manifest/manifest.json) and the provided rules. Produce a validation report describing whether the file implements the class \"library.repository.LoanRepository\" exactly as declared (constructor signature, fields, methods, and imports). Decide and state whether to: continue, rerun using one of the rerun methods (refiner or remake), or break. Provide explicit findings and suggested action.",
+      "target_file": "example/validation/library_repository_LoanRepository_validation.json",
+      "rerun_strategy": "example/rerun_strategy/rerun_strategy_class.json",
+      "rerun_methods": [
+        "refiner",
+        "remake"
+      ],
+      "target_run": "library_repository_LoanRepository"
+    },
+    {
+      "name": "core_storage_JsonStorage",
+      "profile_file": "context_files/profiles/python/openai-5/coders/py_generator.json",
+      "context_file": [
+        "example/manifest/manifest.json",
+        "context_files/general_rules/python_rules.json"
+      ],
+      "task_description": "Generate exactly one Python MODULE FILE at the target path \"library_manager/core/storage.py\". The file MUST include the required imports declared in the manifest. The file MUST define exactly ONE top-level class with id \"core.storage.JsonStorage\". The class MUST match the manifest: constructor signature, fields, methods, and imports as declared. Do NOT define any other classes in that file. Do NOT write any other files.",
+      "target_file": "library_manager/core/storage.py"
+    },
+    {
+      "name": "core_storage_JsonStorage__validator",
+      "profile_file": "context_files/profiles/python/openai-5/validators/py_validator.json",
+      "context_file": [
+        "example/manifest/manifest.json",
+        "library_manager/core/storage.py",
+        "context_files/general_rules/python_rules.json"
+      ],
+      "task_description": "Validate the implementation at \"library_manager/core/storage.py\" against the manifest (example/manifest/manifest.json) and the provided rules. Produce a validation report describing whether the file implements the class \"core.storage.JsonStorage\" exactly as declared (constructor signature, fields, methods, and imports). Decide and state whether to: continue, rerun using one of the rerun methods (refiner or remake), or break. Provide explicit findings and suggested action.",
+      "target_file": "example/validation/core_storage_JsonStorage_validation.json",
+      "rerun_strategy": "example/rerun_strategy/rerun_strategy_class.json",
+      "rerun_methods": [
+        "refiner",
+        "remake"
+      ],
+      "target_run": "core_storage_JsonStorage"
+    },
+    {
+      "name": "core_printing_ConsolePrinter",
+      "profile_file": "context_files/profiles/python/openai-5/coders/py_generator.json",
+      "context_file": [
+        "example/manifest/manifest.json",
+        "context_files/general_rules/python_rules.json"
+      ],
+      "task_description": "Generate exactly one Python MODULE FILE at the target path \"library_manager/core/printing.py\". The file MUST include the required imports declared in the manifest. The file MUST define exactly ONE top-level class with id \"core.printing.ConsolePrinter\". The class MUST match the manifest: constructor signature, fields, methods, and imports as declared. Do NOT define any other classes in that file. Do NOT write any other files.",
+      "target_file": "library_manager/core/printing.py"
+    },
+    {
+      "name": "core_printing_ConsolePrinter__validator",
+      "profile_file": "context_files/profiles/python/openai-5/validators/py_validator.json",
+      "context_file": [
+        "example/manifest/manifest.json",
+        "library_manager/core/printing.py",
+        "context_files/general_rules/python_rules.json"
+      ],
+      "task_description": "Validate the implementation at \"library_manager/core/printing.py\" against the manifest (example/manifest/manifest.json) and the provided rules. Produce a validation report describing whether the file implements the class \"core.printing.ConsolePrinter\" exactly as declared (constructor signature, fields, methods, and imports). Decide and state whether to: continue, rerun using one of the rerun methods (refiner or remake), or break. Provide explicit findings and suggested action.",
+      "target_file": "example/validation/core_printing_ConsolePrinter_validation.json",
+      "rerun_strategy": "example/rerun_strategy/rerun_strategy_class.json",
+      "rerun_methods": [
+        "refiner",
+        "remake"
+      ],
+      "target_run": "core_printing_ConsolePrinter"
+    }
+  ]
+}

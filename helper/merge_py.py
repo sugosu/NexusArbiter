@@ -1,23 +1,24 @@
 import os
 import sys
 
-OUTPUT_NAME = "merged_all.txt"
+OUTPUT_NAME = "merged_all_library.txt"
 LICENSE_NAME = "LICENSE"
 
 INCLUDED_DIRS = [
-    r"C:\projects\aiAgency\core",
-    r"C:\projects\aiAgency\context_files",
-    r"C:\projects\aiAgency\example"
+##    r"C:\projects\aiAgency\core",
+ ##   r"C:\projects\aiAgency\context_files",
+##    r"C:\projects\aiAgency\example"
+r"C:\projects\aiAgency\expense_tracker"
 ]
 
 INCLUDED_FILES = [
-    r"C:\projects\aiAgency\cli.py",
-    r"C:\projects\aiAgency\main.py",
-    r"C:\projects\aiAgency\README.md",  # will be skipped unless allowed below
-    r"C:\projects\aiAgency\LICENSE",
+##    r"C:\projects\aiAgency\cli.py",
+ ##   r"C:\projects\aiAgency\main.py",
+  ##  r"C:\projects\aiAgency\README.md",  # will be skipped unless allowed below
+   ## r"C:\projects\aiAgency\LICENSE",
 ]
 
-ALLOWED_EXTENSIONS = {".py",".json"}  # extend if needed, e.g. {".py", ".json"}
+ALLOWED_EXTENSIONS = {".py"}  # extend if needed, e.g. {".py", ".json"}
 
 
 def _safe_abspath(path: str) -> str:

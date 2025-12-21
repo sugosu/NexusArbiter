@@ -39,7 +39,7 @@
     "profile_file": "context_files/profiles/python/openai-5/coders/py_generator.json",
     "provider": "openai",
 
-    "context_files": [
+    "context_file": [
       "example/manifest/manifest.json",
       "context_files/general_rules/python_rules.json"
     ],
@@ -61,5 +61,23 @@
       "That run MUST instruct the coder to create exactly one module file containing ALL classes mapped to that file_path.",
       "No additional classes may be included, and no classes may be omitted."
     ]
-  }
+  },
+"app_class_specific_rules": {
+  "shared_file_path_policy": [
+    "For the App.py (or other foundational class that handles user input), the task description MUST require comments that explicitly describe how command-line arguments are interpreted and MUST include at least one commented example invocation using those arguments. Comments are documentation only and MUST NOT change behavior."
+  ]
+},
+"main_class_specific_rules": {
+  "shared_file_path_policy": [
+    "For main.py (or other foundational entry-point class), the task description MUST require comments that explicitly describe how the application is started from the command line and MUST include at least one commented example run command. Comments are documentation only and MUST NOT change behavior.",
+    "For main.py (or the entry-point module), the task description MUST require configuring logging once (at least INFO level) and MUST require printing the command result to stdout so the program never exits silently; include a brief comment with one example run command."
+  ]
+},
+"repository_classes_specific_rules": {
+  "shared_file_path_policy": [
+    "For repository classes that persist data to JSON files, the task description MUST require the code to ensure the backing JSON file exists; if it does not exist, the repository MUST create it with a valid empty JSON structure appropriate for the repository (e.g., an empty array). This behavior MUST be implemented deterministically and documented briefly in comments."
+  ]
+}
+
+
 }

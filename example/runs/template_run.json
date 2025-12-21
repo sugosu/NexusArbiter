@@ -9,18 +9,16 @@
     {
       "name": "story_teller",
       "profile_file": "context_files/profiles/python/openai-5/planners/story_teller.json",
-      "provider": "openai",
       "context_file": [
         "context_files/general_rules/story_rules.json",
         "context_files/general_rules/story_example.json"
       ],
-      "task_description": "Create an application story for a local Library Manager app that stores its data as JSON files on the user's computer. The app will support managing books, members, and book loans. It must enforce business rules to prevent borrowing if a book is out of stock or if a member has exceeded their loan limit, and runs fully offline.",
+      "task_description": "Create an application story for a local Task Manager app that stores its data as JSON files on the user's computer. The app will support managing tasks and projects where each task belongs to a project. User will be able to set task status (todo, in_progress, done) and priority (low, medium, high), and the app will prevent deleting projects that still have tasks. The app runs fully offline.",
       "target_file": "example/story/story.json"
     },
     {
       "name": "relationship_generator",
       "profile_file": "context_files/profiles/python/openai-5/planners/py_relationship_generator.json",
-      "provider": "openai",
       "context_file": [
         "context_files/general_rules/relationship_example.json",
         "context_files/general_rules/relationship_rules.json",
@@ -33,7 +31,6 @@
     {
       "name": "relationship_validator",
       "profile_file": "context_files/profiles/python/openai-5/validators/py_relationship_validator.json",
-      "provider": "openai",
       "context_file": [
         "example/relationship/relationship.json",
         "context_files/general_rules/relationship_example.json",
@@ -50,10 +47,10 @@
     {
       "name": "attribution_generator",
       "profile_file": "context_files/profiles/python/openai-5/planners/py_attribution_generator.json",
-      "provider": "openai",
       "context_file": [
         "example/relationship/relationship.json",
-        "context_files/general_rules/attribution_rules.json"
+        "context_files/general_rules/attribution_rules.json",
+        "example/story/story.json"
       ],
       "task_description": "Generate Python class blueprints (imports, fields, constructors, methods, notes) for all classes defined in the provided relationship.json context.",
       "target_file": "example/attributes/attributes.json"
@@ -62,7 +59,6 @@
     {
       "name": "attribution_validator",
       "profile_file": "context_files/profiles/python/openai-5/validators/py_attribution_validator.json",
-      "provider": "openai",
       "context_file": [
         "example/attributes/attributes.json",
         "example/relationship/relationship.json",
@@ -79,7 +75,6 @@
     {
       "name": "manifest_generator",
       "profile_file": "context_files/profiles/python/openai-5/planners/py_manifest_generator.json",
-      "provider": "openai",
       "context_file": [
         "example/relationship/relationship.json",
         "example/attributes/attributes.json",
@@ -93,7 +88,6 @@
     {
       "name": "manifest_validator",
       "profile_file": "context_files/profiles/python/openai-5/validators/py_manifest_validator.json",
-      "provider": "openai",
       "context_file": [
         "example/manifest/manifest.json",
         "context_files/general_rules/manifest_rules.json"
@@ -109,7 +103,6 @@
     {
       "name": "py_run_generator",
       "profile_file": "context_files/profiles/python/openai-5/planners/py_run_generator.json",
-      "provider": "openai",
       "context_file": [
         "example/manifest/manifest.json",
         "context_files/general_rules/run_generator_rules.json"
@@ -117,6 +110,45 @@
       "task_description": "Generate a runs.json file that contains one run per Python class defined in the provided manifest.json. Each run must target exactly one class and write to project_name/<class.file_path>. Use only the manifest as the architectural source of truth.",
       "target_file": "example/runs/class_runs.json"
     },
-{"include_runs": ["example/runs/class_runs.json"]}    
+        {
+      "name": "json_validator",
+      "profile_file": "context_files/profiles/python/openai-5/validators/json_validator.json",
+      "context_file": [
+        "example/runs/class_runs.json"
+      ],
+      "task_description": "Validate that the previous step’s output is syntactically valid JSON, continuing the pipeline if it parses successfully or requesting a remake rerun with a structured parse-error report if it does not.",
+      "target_file": "example/validation/class_runs_json_validation.json",
+
+      "rerun_strategy": "example/rerun_strategy/rerun_strategy.json",
+      "rerun_methods": ["remake"],
+      "target_run": "py_run_generator"
+    },
+            {
+      "name": "strategy_maker",
+      "profile_file": "context_files/profiles/python/openai-5/planners/py_strategy_maker.json",
+      "context_file": [
+        "example/runs/class_runs.json",
+        "example/manifest/manifest.json"
+      ],
+      "task_description": "Generate rerun_strategy_class.json in the blocks/attempts schema for all class generator runs found in runs_class.json. For each target_run, emit (refiner) block with 2 identical attempts using py_refiner.json and context_files [manifest, class_file, validation_report, python_rules], and (remake) block with 1 attempt using py_generator.json and context_files copied from the original generator run.",
+      "target_file": "example/rerun_strategy/rerun_strategy_class.json"
+    },
+            {
+      "name": "json_validator",
+      "profile_file": "context_files/profiles/python/openai-5/validators/json_validator.json",
+      "context_file": [
+        "example/rerun_strategy/rerun_strategy_class.json"
+      ],
+      "task_description": "Validate that the previous step’s output is syntactically valid JSON, continuing the pipeline if it parses successfully or requesting a remake rerun with a structured parse-error report if it does not.",
+      "target_file": "example/validation/rerun_strategy_json_validation.json",
+
+      "rerun_strategy": "example/rerun_strategy/rerun_strategy.json",
+      "rerun_methods": ["remake"],
+      "target_run": "strategy_generator"
+    },
+    
+{
+  "include_runs": ["example/runs/class_runs.json"]
+}    
   ]
 }

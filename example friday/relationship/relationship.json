@@ -1,0 +1,234 @@
+{
+  "mode": "strict",
+  "metadata": {
+    "system_name": "library_manager",
+    "source_type": "derived_from_story",
+    "language": "python",
+    "version": "1.0.0"
+  },
+  "classes": [
+    {
+      "id": "main.Main",
+      "file_path": "main.py",
+      "class_name": "Main",
+      "role": "entry_point",
+      "purpose": "Application entry point. Wires dependencies (application orchestrator and console printer) and starts the top-level run loop; contains no business logic.",
+      "depends_on": [
+        "library.app.LibraryApp",
+        "core.logging.ConsolePrinter"
+      ],
+      "interactions": [
+        {
+          "target_id": "library.app.LibraryApp",
+          "interaction_method": "run()",
+          "interaction_way": "method call",
+          "semantics": "Invokes the application's top-level execution method to start processing. Keeps orchestration responsibility in a separate component."
+        },
+        {
+          "target_id": "core.logging.ConsolePrinter",
+          "interaction_method": "print_startup(message)",
+          "interaction_way": "method call",
+          "semantics": "Prints a concise startup summary to stdout before delegating to the application orchestrator."
+        }
+      ],
+      "notes": [
+        "Satisfies the rule: exactly one entry point and located in main.py.",
+        "No domain logic here; only initializes and triggers LibraryApp.run()."
+      ]
+    },
+    {
+      "id": "library.app.LibraryApp",
+      "file_path": "library/app.py",
+      "class_name": "LibraryApp",
+      "role": "orchestration",
+      "purpose": "Top-level application orchestrator: coordinates domain services to perform operations and prepares concise summaries for output.",
+      "depends_on": [
+        "library.service.LibraryService",
+        "core.logging.ConsolePrinter"
+      ],
+      "interactions": [
+        {
+          "target_id": "library.service.LibraryService",
+          "interaction_method": "list_books()/list_members()/list_loans()",
+          "interaction_way": "method call",
+          "semantics": "Requests current collections from the domain service to produce concise startup or periodic summaries. These calls represent non-mutating queries used for reporting."
+        },
+        {
+          "target_id": "core.logging.ConsolePrinter",
+          "interaction_method": "print_summary(summary)",
+          "interaction_way": "method call",
+          "semantics": "Prints the concise summaries produced from service queries to stdout as required by the story."
+        }
+      ],
+      "notes": [
+        "Coordinates high-level flows but delegates actual business rules to LibraryService.",
+        "Because the story requires printing concise summaries to stdout, this component requests data from the service and delegates output to ConsolePrinter."
+      ]
+    },
+    {
+      "id": "library.service.LibraryService",
+      "file_path": "library/service.py",
+      "class_name": "LibraryService",
+      "role": "domain_service",
+      "purpose": "Encapsulates domain logic for books, members, and loans. Enforces business rules: prevent borrowing when no copies available and prevent members exceeding loan limits. Exposes create/list/update/delete operations and loan/return operations.",
+      "depends_on": [
+        "library.repository.BookRepository",
+        "library.repository.MemberRepository",
+        "library.repository.LoanRepository",
+        "core.logging.ConsolePrinter"
+      ],
+      "interactions": [
+        {
+          "target_id": "library.repository.BookRepository",
+          "interaction_method": "load_all(path)/save(book, path)/update(book_id, data, path)/delete(book_id, path)",
+          "interaction_way": "method call",
+          "semantics": "Manages book persistence and enforces invariants related to available copies. Repository methods receive 'path' explicitly (method-level path ownership)."
+        },
+        {
+          "target_id": "library.repository.MemberRepository",
+          "interaction_method": "load_all(path)/save(member, path)/update(member_id, data, path)/delete(member_id, path)",
+          "interaction_way": "method call",
+          "semantics": "Manages members and their loan counts; service enforces member loan limits. Path is passed as a method parameter to repository methods."
+        },
+        {
+          "target_id": "library.repository.LoanRepository",
+          "interaction_method": "load_all(path)/save(loan, path)/update(loan_id, data, path)",
+          "interaction_way": "method call",
+          "semantics": "Creates and returns loans while enforcing availability and member limits. Persistence operations explicitly accept 'path' parameters."
+        },
+        {
+          "target_id": "core.logging.ConsolePrinter",
+          "interaction_method": "print_info(message)/print_warning(message)",
+          "interaction_way": "method call",
+          "semantics": "Emit concise summaries and rule-violation notices to stdout when operations occur or are prevented by business rules."
+        }
+      ],
+      "notes": [
+        "This service owns domain rules (available copies, member loan limits) and orchestrates repository calls to persist state.",
+        "All repository calls explicitly accept file path(s) as method-level parameters per parameter ownership rules."
+      ]
+    },
+    {
+      "id": "library.repository.BookRepository",
+      "file_path": "library/repository.py",
+      "class_name": "BookRepository",
+      "role": "repository",
+      "purpose": "Persistence abstraction for Book entities. Maps between domain objects and JSON-serializable structures and delegates I/O to JsonStorage.",
+      "depends_on": [
+        "core.storage.JsonStorage",
+        "core.logging.ConsolePrinter"
+      ],
+      "interactions": [
+        {
+          "target_id": "core.storage.JsonStorage",
+          "interaction_method": "read(path)/write(path, data)",
+          "interaction_way": "method call",
+          "semantics": "Reads and writes the books JSON file; callers pass the file path explicitly. The repository adapts between JSON and Book domain structures."
+        },
+        {
+          "target_id": "core.logging.ConsolePrinter",
+          "interaction_method": "print_debug(message)",
+          "interaction_way": "method call",
+          "semantics": "Emits low-level persistence events and debug messages to stdout for traceability."
+        }
+      ],
+      "notes": [
+        "Follows method-level path ownership: public repository methods accept 'path' parameters from the service.",
+        "Does not implement domain validation; it only adapts and persists domain objects."
+      ]
+    },
+    {
+      "id": "library.repository.MemberRepository",
+      "file_path": "library/repository.py",
+      "class_name": "MemberRepository",
+      "role": "repository",
+      "purpose": "Persistence abstraction for Member entities. Handles mapping between member domain objects and JSON and delegates file I/O to JsonStorage.",
+      "depends_on": [
+        "core.storage.JsonStorage",
+        "core.logging.ConsolePrinter"
+      ],
+      "interactions": [
+        {
+          "target_id": "core.storage.JsonStorage",
+          "interaction_method": "read(path)/write(path, data)",
+          "interaction_way": "method call",
+          "semantics": "Reads and writes the members JSON file; the repository accepts path as a method parameter."
+        },
+        {
+          "target_id": "core.logging.ConsolePrinter",
+          "interaction_method": "print_debug(message)",
+          "interaction_way": "method call",
+          "semantics": "Logs persistence-related debug messages to stdout."
+        }
+      ],
+      "notes": [
+        "Repository focuses on persistence; domain rules (loan limits) are enforced by LibraryService.",
+        "Path ownership is external: service supplies paths to repository methods."
+      ]
+    },
+    {
+      "id": "library.repository.LoanRepository",
+      "file_path": "library/repository.py",
+      "class_name": "LoanRepository",
+      "role": "repository",
+      "purpose": "Persistence abstraction for Loan records. Saves and retrieves loan entries and delegates JSON I/O to JsonStorage.",
+      "depends_on": [
+        "core.storage.JsonStorage",
+        "core.logging.ConsolePrinter"
+      ],
+      "interactions": [
+        {
+          "target_id": "core.storage.JsonStorage",
+          "interaction_method": "read(path)/write(path, data)",
+          "interaction_way": "method call",
+          "semantics": "Reads and writes the loans JSON file; path is passed explicitly by callers."
+        },
+        {
+          "target_id": "core.logging.ConsolePrinter",
+          "interaction_method": "print_debug(message)",
+          "interaction_way": "method call",
+          "semantics": "Logs persistence operations related to loans to stdout."
+        }
+      ],
+      "notes": [
+        "Used by LibraryService to persist loan creation and returns.",
+        "Repository methods accept path parameters; no implicit file path ownership is assumed here."
+      ]
+    },
+    {
+      "id": "core.storage.JsonStorage",
+      "file_path": "core/storage.py",
+      "class_name": "JsonStorage",
+      "role": "storage_adapter",
+      "purpose": "Low-level JSON file storage adapter responsible for reading and writing JSON-serializable data to files in the working directory.",
+      "depends_on": [
+        "core.logging.ConsolePrinter"
+      ],
+      "interactions": [
+        {
+          "target_id": "core.logging.ConsolePrinter",
+          "interaction_method": "print_debug(message)/print_error(message)",
+          "interaction_way": "method call",
+          "semantics": "Reports I/O events and file errors to stdout for visibility. The adapter deals only with JSON-serializable structures and byte I/O."
+        }
+      ],
+      "notes": [
+        "Does not contain domain knowledge; it only performs file I/O for arbitrary JSON structures.",
+        "Path ownership is external: callers (repositories) pass the file path explicitly on each call."
+      ]
+    },
+    {
+      "id": "core.logging.ConsolePrinter",
+      "file_path": "core/printing.py",
+      "class_name": "ConsolePrinter",
+      "role": "logging_adapter",
+      "purpose": "Simple stdout printing adapter used to emit concise operation summaries, debug lines, and warnings to the user as required by the story.",
+      "depends_on": [],
+      "interactions": [],
+      "notes": [
+        "Implements print_summary/print_info/print_debug/print_warning APIs that the application and services call.",
+        "No external dependencies; prints directly to stdout per the story's requirement."
+      ]
+    }
+  ]
+}

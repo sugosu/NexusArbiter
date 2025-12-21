@@ -9,75 +9,80 @@ License-File: LICENSE
 Requires-Dist: openai>=1.0.0
 Requires-Dist: python-dotenv>=1.0.0
 Requires-Dist: rich>=13.0.0
+Requires-Dist: pytest>=7.0.0
+Requires-Dist: google-genai>=0.1.0
+Requires-Dist: jsonschema>=4.0.0
 Dynamic: license-file
 
+# NexusArbiter
 
-### AI HACK
+**A file-based, deterministic multi-agent framework for structured AI interactions.**
 
- In this repository, there is a file called `merged_all`. It includes all necessary files in this project, along with this README.
- If you provide this file to your own AI and ask it to analyze the contents, the AI can guide you through the entire framework. It takes very little time for it to fully comprehend NexusArbiter.
+NexusArbiter is designed for real-world and enterprise use cases, offering:
 
-### NexusArbiter — Compiled Creativity
+- **Reproducibility** — Consistent outputs from identical inputs
+- **Auditability** — Full transparency into agent decisions
+- **Predictability** — Deterministic behavior you can rely on
+- **Configurability** — Flexible JSON-based workflow definitions
 
-NexusArbiter is a file-based, deterministic multi-agent framework. By design, it is:
+---
 
-* **Reproducible**
-* **Auditable**
-* **Predictable**
-* **Configurable**
+## Quick Start
 
-It proposes a structured and explicit way to interact with AI agents, making it an ideal candidate for real-world and enterprise use cases.
+### Requirements
 
-## Requirements
+- Python 3.10+
+- API key for OpenAI (the other providers are in progress)
+- Windows, macOS, or Linux
 
-* **Python 3.10** or newer
-* A valid **API key** for a supported provider (OpenAI or Gemini)
-* Windows, macOS, or Linux
+### Installation
 
-## What Is a Prompt Model?
+```bash
+# Upgrade pip
+python -m pip install --upgrade pip
 
-A Prompt Model is the complete set of context files required for an AI system to achieve a human-defined goal. It is not a single prompt. It is a structured execution model composed of explicit artifacts.
+# Install dependencies
+pip install -r requirements.txt
+```
 
-A Prompt Model consists of five file types:
+### Configuration
 
-1.  **Runs**
-    Define the sequential execution of agents required to reach the target goal.
-2.  **Context Files**
-    Include rules, response schemas, and examples provided to the AI.
-3.  **Profiles**
-    Define agent personas, provider-specific parameters, and generic agent instructions.
-4.  **Target Files**
-    Represent validated outputs produced by agents.
-5.  **Reruns**
-    Define alternative or repeated agent calls that can be executed with the same or different context files when a previous step (typically a validator) requests a retry.
+Set your OpenAI API key:
 
-These abstractions are sufficient to model and execute most automation workflows required to achieve complex tasks.
+**macOS / Linux:**
+```bash
+export OPENAI_API_KEY="your_api_key_here"
+```
 
-## How to Use
+**Windows:**
 
-NexusArbiter follows a **Bring Your Own Key** philosophy and currently supports OpenAI and Gemini. Additional providers will be added.
+Create a `.env` file in the root folder:
+```
+OPENAI_API_KEY=your_api_key_here
+```
 
-### Configure your API key
+> Need an API key? See the [OpenAI Quickstart Guide](https://platform.openai.com/docs/quickstart)
 
-You can set your API key using a `.env` file.
-Or by setting an environment variable directly on Windows.
+### Run Your First Workflow
 
-### Prepare a run configuration
+```bash
+python cli.py run /example/template/template_run.json
+```
 
-Locate a `run.json` file (an example is provided in the repository). Place a simple application idea inside it. The more context you provide, the better the result will be. With the current Prompt Model, NexusArbiter is optimized for small applications.
+This launches the example workflow, which generates a Library Manager application by default. To customize the task, edit the first task description in `template_run.json`.
 
-### Run the workflow
+---
 
-Run the workflow using:
+## 💡 Tip: AI-Assisted Learning
 
-python main.py myproject/run.json
+This repository includes a `merged_all` file containing all project files concatenated together. Feed this file to an AI assistant to get a comprehensive walkthrough of the entire framework in minutes.
 
-Note: This entry point will be replaced with a packaged CLI in a future release.
+---
 
-While the workflow is running, you can inspect the run.json file and related context files, or ask your AI to explain them.
+## Documentation
 
-Output
+*Coming soon — explore the `/example` directory for workflow templates and patterns.*
 
-When execution completes, multiple files will be generated as output.
+## License
 
-Enjoy your generated application.
+*Add your license here*

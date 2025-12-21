@@ -26,8 +26,6 @@ class FileWriteAction(BaseAction):
         effective_path: Optional[str] = ctx.target_file
 
         # Fallback to agent suggestion
-        if not effective_path:
-            effective_path = params.get("target_path")
 
         if not effective_path:
             ctx.logger.error(

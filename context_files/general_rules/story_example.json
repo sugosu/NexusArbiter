@@ -1,19 +1,37 @@
 {
   "mode": "strict",
   "metadata": {
-    "system_name": "example_app",
-    "domain": "example_domain",
-    "source_story_type": "minimal_story",
+    "system_name": "generic_crud_app",
+    "domain": "generic_records",
+    "source_story_type": "application_story",
     "version": "v1"
   },
   "sections": [
     {
       "name": "App Story",
-      "content": "An application that manages a collection of records. Each record has an id and associated data. Records can be created, listed, and deleted. Data persists locally as JSON between runs."
+      "content": "A local, offline command-line CRUD application that manages a collection of records stored as JSON on the user's computer. Each record has a unique 'id' and a set of fields. The application supports create, list, get, update, and delete operations. All data persists locally between runs using JSON files."
     },
-{
-  "name": "Entry Point",
-  "content": "Run with: python main.py\n\nmain.py wires up dependencies and calls service methods directly to demonstrate core operations (create, list, delete). No command-line arguments. No stdin input. No interactive commands. Results print to stdout."
+    {
+  "name": "User Interaction",
+  "content": "Users run the program via: python main.py '<json_payload>'. The program accepts exactly one user-provided CLI argument: argv[1], a JSON string representing the full command. The application performs exactly one operation per invocation, prints a single JSON result object to stdout for every command, and then exits. It returns a stable exit code (0 on success, 2 on user/validation/not-found/conflict errors, 1 on internal errors). There are no interactive prompts, no loops, no stdin input, and no additional CLI flags or positional arguments beyond the single JSON payload."
 }
+,
+{
+  "name": "Architecture",
+  "content": "The implementation follows a fixed layered architecture: main.py -> app.py -> controller.py -> service.py -> repository/<entity>_repository.py -> storage.py. main.py is the process entry point and contains only bootstrap logic: it wires dependencies, resolves the data directory, and passes through the raw single JSON payload string from argv[1] to App.run(raw_json, data_dir). main.py MUST NOT parse JSON beyond verifying that exactly one payload argument was provided. app.py implements all input parsing and validation: it validates that raw_json is valid JSON and converts it into a structured command dictionary, rejecting invalid or non-JSON input. The JSON payload represents the full user command (including entity, action, and data) and is the sole input mechanism; no interactive prompts, stdin, additional CLI flags, or extra positional arguments are allowed. controller.py dispatches based on fields in the parsed command JSON (e.g., entity and action) and translates domain errors into a standard result dictionary. service.py implements CRUD operations per entity, validates command data according to domain rules, and calls repositories. Each repository class is defined in its own file (one class per file) and provides persistence CRUD operations against JSON files through the storage adapter. storage.py provides read/write access to JSON arrays with atomic writes and returns an empty list when a storage file does not exist."
+}
+,
+    {
+      "name": "Data and Persistence",
+      "content": "Each entity is stored in its own JSON file under a configurable data directory (default: ./data). Each JSON file stores an array of record objects. Every record includes an 'id' field plus entity-specific fields. Repositories never generate ids and never implement business rules; they only persist and retrieve records via the storage adapter. The storage adapter performs filesystem I/O only and contains no domain logic. All operations are atomic: on failure, no partial changes are persisted."
+    },
+    {
+      "name": "Identity and ID Policy",
+      "content": "Record identifiers are supplied explicitly by the caller through the command-line interface when creating records. The application does not auto-generate ids. The service layer validates id uniqueness on create and returns a conflict error if a record with the same id already exists. Repositories and storage layers must never generate, modify, or infer ids."
+    },
+    {
+      "name": "CRUD Operations",
+      "content": "For every entity, the program exposes these actions: create, list, get, update, delete. Create requires an id and required fields defined for that entity. Update allows only a predefined set of fields. The service returns not-found errors when an id does not exist and validation errors when required fields are missing or invalid. There are no workflows or cross-entity rules beyond CRUD."
+    }
   ]
 }

@@ -1,41 +1,86 @@
 {
   "implementation_story_rules": {
     "mode_requirement": "strict",
+       "app_type": "crud_basic",
+    "defaults": [
+      "The application is CRUD-only unless the task description explicitly requires additional workflows.",
+      "The application is non-interactive (no prompts, no stdin) unless explicitly required.",
+      "Each invocation performs exactly one operation described by a single JSON command provided via the command line."
+    ],
+    "prohibitions": [
+      "Do not introduce non-CRUD workflows (e.g., checkout/return flows) unless explicitly required by the task description.",
+      "Do not describe flags/options/subcommands unless explicitly required by the task description."
+    ],
     "structure": [
       "App Story",
-      "Entry Point"
+      "User Interaction",
+      "Architecture",
+      "Data and Persistence",
+      "Identity and ID Policy",
+      "CRUD Operations"
     ],
     "section_rules": {
       "app_story": [
         "Must be exactly one paragraph.",
-        "Describe only: what the app does, the minimal entities involved (if any), and that data persists locally (if applicable).",
-        "No internal design, no components, no class/module/function mentions."
+        "Describe only what the application does at a user/outcome level.",
+        "Name only the minimal user-facing entities involved (if any).",
+        "State that data persists locally as JSON between runs when persistence is required.",
+        "Do NOT mention any internal architecture, layers, or implementation details."
       ],
-"entry_point": [
-  "Must include: program name and how to run it (e.g., python main.py).",
-  "Describe the basic input/output behavior.",
-  "Keep it minimal and deterministic.",
-  "Do NOT describe CLI commands, stdin input, or interactive behavior unless explicitly required by the task description."
-]
+      "entry_point": [
+        "Must be exactly one paragraph.",
+        "Must include the program name and how to run it (e.g., python main.py).",
+        "Must describe the basic input behavior in one sentence and the basic output behavior in one sentence.",
+        "Must specify that results are printed to stdout as a single JSON object per invocation.",
+        "Must specify deterministic exit codes: 0 for success, 2 for user/validation/not-found/conflict errors, 1 for internal errors.",
+        "Do NOT describe complex CLI features (flags, options, subcommands), stdin input, interactive prompts, or REPL behavior unless explicitly required by the task description."
+      ]
     },
     "hard_prohibitions": [
+      "No execution-model phrasing such as 'entry point', 'startup', 'invokes', 'wires', 'initializes', 'calls', or similar lifecycle language.",
       "No markdown fences or code blocks.",
       "No programming language syntax.",
-      "No class names, module names, method/function signatures.",
-      "No advanced features (auth, sync, plugins, UI, multi-user) unless explicitly required by the task description.",
-      "No CLI argument parsing complexity (flags, options, subcommands) unless explicitly required."
+      "No class names, module names, file paths, or method/function signatures.",
+      "No mention of internal components, layers, frameworks, or design patterns.",
+      "No advanced features (authentication, synchronization, plugins, UI, multi-user) unless explicitly required by the task description.",
+      "No CLI argument parsing complexity (flags, options, subcommands) unless explicitly required by the task description.",
+      "No cross-entity workflows beyond CRUD unless explicitly required by the task description."
     ],
-    "style_constraints": [
+    "style_constraints": [      
       "Be concise and practical.",
-      "Avoid speculative language (may/could/might).",
-      "Avoid examples beyond basic usage."
+      "Use direct, non-speculative language (avoid may/could/might).",
+      "Avoid marketing language and subjective claims.",
+      "Avoid examples beyond basic run usage.",
+      "Avoid enumerating internal steps or describing internal control flow.",
+      "All sections must be phrased in terms of observable behavior and guarantees, not how the program is started or executed internally."
     ],
+"domain_policy_rules": [
+  "If the task requires CRUD, state that the application supports create, list, get, update, and delete operations at a high level, without describing command syntax.",
+  "If the task requires identifier handling, state the ID policy at a user-facing level only (e.g., records are created with explicit ids; ids must be unique).",
+  "If persistence is required, state that each operation is atomic: on failure, no partial changes are persisted.",
+  "If the task requires multiple entity types, mention only the entity names and their high-level purpose.",
+  "If persistence is required, specify that data is stored locally in JSON files under a local data directory, without naming paths or filenames."
+]
+,
     "example_handling_rules": [
-      "Any examples provided in context are FORMAT EXAMPLES ONLY.",
-      "You MUST NOT copy example-specific domain content, entities, or workflows unless explicitly required by the current TASK DESCRIPTION.",
-      "You MUST generate fresh content tailored to the current TASK DESCRIPTION.",
-      "If an example conflicts with the current TASK DESCRIPTION, the TASK DESCRIPTION always wins.",
-      "If the TASK DESCRIPTION is generic, choose neutral, generic naming derived from the task itself."
-    ]
+      "Any examples provided in context are format examples only.",
+      "Do not copy example-specific domain content, entity names, or workflows unless explicitly required by the current task description.",
+      "Always generate fresh content tailored to the current task description.",
+      "If an example conflicts with the current task description, the task description wins.",
+      "If the task description is generic, use neutral naming derived from the task (e.g., records/items/entries)."
+    ],
+"validation_notes": [
+  "App Story must be one paragraph and contain no internal implementation references.",
+  "Entry Point must be one paragraph and must include run command, stdout behavior, and exit code behavior.",
+  "If persistence is mentioned, the story must imply atomic behavior (operations fully succeed or have no effect).",
+  "Both sections must remain compatible with a fixed layered architecture, without naming it."
+],
+"architecture": [
+  "Must describe only user-observable runtime characteristics (e.g., offline operation, determinism, single execution per run) that can be verified by running the program.",
+  "Must NOT describe startup, invocation, wiring, control flow, or internal execution steps.",
+  "Must NOT imply the existence of internal layers, lifecycle phases, or architectural components."
+]
+
+
   }
 }

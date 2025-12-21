@@ -1,17 +1,37 @@
 {
   "classes": [
     {
+      "id": "external.User",
+      "file_path": null,
+      "class_name": null,
+      "role": "external_actor",
+      "purpose": "Represents a human invoking the program exactly once via CLI. Provides command-line arguments (argv) as the sole input source (no stdin, no loops).",
+      "depends_on": [],
+      "used_by": [],
+      "interactions": [],
+      "notes": [
+        "Not a class; MUST NOT be generated as code.",
+        "Input channel is argv only."
+      ]
+    },
+    {
       "id": "main.Main",
       "file_path": "main.py",
       "class_name": "Main",
       "role": "entry_point",
-      "purpose": "Application entry point. Wires dependencies and runs the application.",
+      "purpose": "Application entry point. Receives argv from the external user invocation, wires dependencies, and runs exactly one operation.",
       "depends_on": [
         "core.logging.AppLogger",
         "core.service.TodoService"
       ],
       "used_by": [],
       "interactions": [
+        {
+    "target_id": "external.User",
+    "interaction_method": "invoke(json_command)",
+    "interaction_way": "external input",
+    "semantics": "Receives a single JSON command provided as a command-line argument for one operation; no stdin, no interactive loop."
+  },
         {
           "target_id": "core.logging.AppLogger",
           "interaction_method": "info/error",
@@ -22,12 +42,12 @@
           "target_id": "core.service.TodoService",
           "interaction_method": "add_todo(title, path)/list_todos(path)/delete_todo(todo_id, path)",
           "interaction_way": "method call",
-          "semantics": "Entry point invokes service methods to run core operations."
+          "semantics": "Invokes exactly one service method based on parsed argv. Passes the storage path explicitly as a method-level parameter."
         }
       ],
       "notes": [
-        "Wires up all dependencies and calls service methods.",
-        "No business logic here; only orchestration."
+        "Wires up all dependencies and calls exactly one service method per invocation.",
+        "No business logic here; only orchestration and argv parsing into a single operation."
       ]
     },
     {

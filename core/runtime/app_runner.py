@@ -138,6 +138,7 @@ class AppRunner:
             self.logger.error("Response handling failed: %s", e, exc_info=True)
             return RunResult(success=False, should_break=True)
 
+        
         return self._execute_actions(
             actions=actions,
             run_item=run_item,
@@ -362,7 +363,7 @@ class AppRunner:
     ) -> RunResult:
         ctx = ActionContext(
             project_root=str(self.project_root),
-            target_file=target_file,
+            target_file=run_item.target_file,
             run_name=getattr(run_item, "name", "unnamed_run"),
             run_item=run_item,
             logger=self.logger,
@@ -392,6 +393,25 @@ class AppRunner:
                 )
                 return RunResult(success=False, should_break=True)
 
+            # ---------------------------------------------------------
+            # Rerun routing normalization (name + method)
+            # ---------------------------------------------------------
+            if action_type == "rerun":
+                if not getattr(ctx, "change_strategy_name", None):
+                    n = params.get("name")
+                    if isinstance(n, str) and n.strip():
+                        setattr(ctx, "change_strategy_name", n.strip())
+
+                if not getattr(ctx, "change_strategy_method", None):
+                    m = params.get("method")
+                    if isinstance(m, str) and m.strip():
+                        m = m.strip()
+                        if m not in ("refiner", "remake"):
+                            raise ValueError(
+                                f"Invalid rerun params.method: {m!r}. Must be 'refiner' or 'remake'."
+                            )
+                        setattr(ctx, "change_strategy_method", m)
+
             # IMPORTANT: Strategy change must short-circuit immediately.
             if getattr(ctx, "change_strategy_requested", False):
                 return RunResult(
@@ -406,6 +426,7 @@ class AppRunner:
                 return RunResult(success=True, should_break=True)
 
         return RunResult(success=True, should_continue=True)
+
 
     @staticmethod
     def _call_action_execute(action: BaseAction, ctx: ActionContext, params: Dict[str, Any]) -> None:

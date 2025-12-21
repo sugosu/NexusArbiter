@@ -1,20 +1,24 @@
 {
   "blocks": [
     {
-      "name": "rerun_relationship_refiner",
+      "name": "relationship_generator",
+      "method": "refiner",
       "attempts": [
         {
           "profile_file": "context_files/profiles/python/openai-5/refactorers/py_relationship_refiner.json",
           "provider": "openai",
+          "target_file": "example/relationship/relationship.json",
           "context_files": [
             "example/relationship/relationship.json",
             "context_files/general_rules/relationship_rules.json",
             "example/validation/relationship_validation.json"
           ]
+          
         },
         {
           "profile_file": "context_files/profiles/python/openai-5/refactorers/py_relationship_refiner.json",
           "provider": "openai",
+          "target_file": "example/relationship/relationship.json",
           "context_files": [
             "example/relationship/relationship.json",
             "context_files/general_rules/relationship_rules.json",
@@ -24,28 +28,36 @@
       ]
     },
     {
-      "name": "rerun_relationship_remake",
+      "name": "relationship_generator",
+      "method": "remake",
+      
       "attempts": [
         {
           "profile_file": "context_files/profiles/python/openai-5/planners/py_relationship_generator.json",
           "provider": "openai",
+          "target_file": "example/relationship/relationship.json",
           "context_files": [
             "context_files/general_rules/relationship_example.json",
             "context_files/general_rules/relationship_rules.json",
-            "example/validation/relationship_validation.json"
+            "example/story/story.json"
           ]
         }
+        
       ]
     },
+
     {
-      "name": "rerun_attribution_refiner",
+      "name": "attribution_generator",
+      "method": "refiner",
+      
       "attempts": [
         {
           "profile_file": "context_files/profiles/python/openai-5/refactorers/py_attribution_refiner.json",
+          "target_file": "example/attributes/attributes.json",
           "provider": "openai",
           "context_files": [
             "example/relationship/relationship.json",
-            "example/attribution/attributes.json",
+            "example/attributes/attributes.json",
             "context_files/general_rules/attribution_rules.json",
             "example/validation/attribution_validation.json"
           ]
@@ -53,35 +65,42 @@
         {
           "profile_file": "context_files/profiles/python/openai-5/refactorers/py_attribution_refiner.json",
           "provider": "openai",
+          "target_file": "example/attributes/attributes.json",
           "context_files": [
-            "project/relationship/relationship.json",
-            "project/attribution/blueprint.json",
+            "example/relationship/relationship.json",
+            "example/attributes/attributes.json",
             "context_files/general_rules/attribution_rules.json",
-            "project/validation/attribution_validation.json"
+            "example/validation/attribution_validation.json"
           ]
         }
       ]
     },
     {
-      "name": "rerun_attribution_remake",
+      "name": "attribution_generator",
+      
+      "method": "remake",
       "attempts": [
         {
           "profile_file": "context_files/profiles/python/openai-5/planners/py_attribution_generator.json",
           "provider": "openai",
+          "target_file": "example/attributes/attributes.json",
           "context_files": [
             "example/relationship/relationship.json",
-            "context_files/general_rules/attribution_rules.json",
-            "example/validation/relationship_validation.json"
+            "context_files/general_rules/attribution_rules.json"
           ]
         }
       ]
     },
+
     {
-      "name": "rerun_manifest_refiner",
+      "name": "manifest_generator",
+      "method": "refiner",
+      
       "attempts": [
         {
           "profile_file": "context_files/profiles/python/openai-5/refactorers/py_manifest_refiner.json",
           "provider": "openai",
+          "target_file": "example/manifest/manifest.json",
           "context_files": [
             "example/relationship/relationship.json",
             "example/attributes/attributes.json",
@@ -93,6 +112,7 @@
         {
           "profile_file": "context_files/profiles/python/openai-5/refactorers/py_manifest_refiner.json",
           "provider": "openai",
+          "target_file": "example/manifest/manifest.json",
           "context_files": [
             "example/relationship/relationship.json",
             "example/attributes/attributes.json",
@@ -104,16 +124,90 @@
       ]
     },
     {
-      "name": "rerun_manifest_remake",
+      "name": "manifest_generator",
+      "method": "remake",
+      
       "attempts": [
         {
           "profile_file": "context_files/profiles/python/openai-5/planners/py_manifest_generator.json",
           "provider": "openai",
+          "target_file": "example/manifest/manifest.json",
           "context_files": [
             "example/relationship/relationship.json",
             "example/attributes/attributes.json",
             "context_files/general_rules/manifest_rules.json",
-            "example/validation/relationship_validation.json"
+            "context_files/general_rules/manifest_example.json"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "py_run_generator",
+      "method": "remake",
+
+      "attempts": [
+        {
+          "profile_file": "context_files/profiles/python/openai-5/planners/py_run_generator.json",
+          "provider": "openai",
+                "target_file": "example/runs/class_runs.json",
+          "context_files": [
+            "example/relationship/relationship.json",
+            "example/attributes/attributes.json",
+            "context_files/general_rules/manifest_rules.json",
+            "context_files/general_rules/manifest_example.json"
+          ]
+        },
+        {
+          "profile_file": "context_files/profiles/python/openai-5/planners/py_run_generator.json",
+          "provider": "openai",
+                "target_file": "example/runs/class_runs.json",
+          "context_files": [
+            "example/relationship/relationship.json",
+            "example/attributes/attributes.json",
+            "context_files/general_rules/manifest_rules.json",
+            "context_files/general_rules/manifest_example.json"
+          ]
+        },
+        {
+          "profile_file": "context_files/profiles/python/openai-5/planners/py_run_generator.json",
+          "provider": "openai",
+                "target_file": "example/runs/class_runs.json",
+          "context_files": [
+            "example/relationship/relationship.json",
+            "example/attributes/attributes.json",
+            "context_files/general_rules/manifest_rules.json",
+            "context_files/general_rules/manifest_example.json"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "strategy_generator",
+      "method": "remake",
+      
+      "attempts": [
+        {
+          "profile_file": "context_files/profiles/python/openai-5/planners/py_strategy_maker.json",
+          "provider": "openai",
+          "target_file": "example/runs/rerun_strategy_class.json",
+          "context_files": [
+            "example/rerun_strategy/rerun_strategy_class.json"
+          ]
+        },
+        {
+          "profile_file": "context_files/profiles/python/openai-5/planners/py_strategy_maker.json",
+          "provider": "openai",
+          "target_file": "example/runs/rerun_strategy_class.json",
+          "context_files": [
+            "example/rerun_strategy/rerun_strategy_class.json"
+          ]
+        },
+        {
+          "profile_file": "context_files/profiles/python/openai-5/planners/py_strategy_maker.json",
+          "provider": "openai",
+          "target_file": "example/runs/rerun_strategy_class.json",
+          "context_files": [
+            "example/rerun_strategy/rerun_strategy_class.json"
           ]
         }
       ]

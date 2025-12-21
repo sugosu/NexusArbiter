@@ -1,0 +1,16 @@
+{
+  "provider": "openai",
+  "model": "gpt-5-mini",
+  "max_tokens": 500,
+  "response_format": { "type": "json_object" },
+  "messages": [
+    {
+      "role": "system",
+      "content": "You are a NexusArbiter agent. You MUST output a single JSON object with shape: {\"agent\": {\"actions\": [ ... ] }}. No extra text."
+    },
+    {
+      "role": "user",
+      "content": "Task: ${task_description}\n\nAllowed actions: ${agent_input}\n\nReturn actions. For a simple test, prefer a single action: {\"type\":\"continue\",\"params\":{\"reason\":\"ok\"}}"
+    }
+  ]
+}

@@ -1,0 +1,1029 @@
+
+##########################################################################################
+# FILE: expense_tracker\app\application.py
+##########################################################################################
+
+from typing import Dict, Any
+
+from controllers.controller import CommandController
+from app_logging import AppLogger
+
+
+class Application:
+    """Application orchestration boundary.
+
+    Responsibilities:
+    - Hold injected controller, logger, and data_dir configuration.
+    - Forward commands to the controller and return controller results.
+
+    Constructor and public API are defined by the manifest and must not perform I/O.
+    """
+
+    def __init__(self, controller: CommandController, logger: AppLogger, data_dir: str) -> None:
+        """Initialize the Application with its dependencies.
+
+        Args:
+            controller: CommandController used to handle incoming commands.
+            logger: AppLogger for structured logging.
+            data_dir: Path to the data directory (ownership remains with caller/application).
+        """
+        # Dependency injection assignments; do not perform I/O here.
+        self._controller: CommandController = controller
+        self._logger: AppLogger = logger
+        self._data_dir: str = data_dir
+
+    def run(self, command: Dict[str, Any], data_dir: str) -> Dict[str, Any]:
+        """Run a high-level command by delegating to the controller.
+
+        This method logs high-level dispatch information, does not mutate the
+        provided data_dir, and forwards both the command and data_dir to the
+        controller.handle(...) method. The controller result is returned as-is.
+
+        Args:
+            command: A command dict following the shared command contract.
+            data_dir: The data directory to forward to downstream components.
+
+        Returns:
+            The result produced by the controller (dict).
+        """
+        # Log a concise, high-level dispatch message. Include entity/action if present
+        # but do not attempt deep parsing here (controller owns validation/routing).
+        try:
+            entity = command.get("entity") if isinstance(command, dict) else None
+            action = command.get("action") if isinstance(command, dict) else None
+        except Exception:
+            entity = None
+            action = None
+
+        self._logger.info("Application dispatching command", {"entity": entity, "action": action})
+
+        # Forward to the controller and return its result. Do not mutate data_dir.
+        result = self._controller.handle(command, data_dir)
+        return result
+
+
+
+##########################################################################################
+# FILE: expense_tracker\app_logging.py
+##########################################################################################
+
+import logging
+from typing import Any, Optional
+
+
+class AppLogger:
+    """Thin application logging adapter wrapping the stdlib logging.Logger.
+
+    This class intentionally provides a small, explicit surface (debug/info/warning/error)
+    so the rest of the application can depend on a stable logging API without importing
+    the stdlib logging module directly.
+    """
+
+    def __init__(self, logger_name: Optional[str] = None) -> None:
+        """Create or obtain an underlying stdlib Logger.
+
+        Per manifest: do not perform I/O in the constructor. Handlers/formatters should be
+        configured by application composition if needed.
+        """
+        self._logger = logging.getLogger(logger_name or "expense_tracker")
+
+    def debug(self, message: str, data: Optional[Any] = None) -> None:
+        """Log a debug-level message, optionally including structured data.
+
+        The adapter prefers to keep things simple: when data is provided it is appended
+        to the formatted message using repr() to avoid surprising serialization behavior.
+        """
+        if data is None:
+            self._logger.debug(message)
+        else:
+            # Keep structured data visible without assuming any serializer/handler.
+            self._logger.debug("%s | data=%r", message, data)
+
+    def info(self, message: str, data: Optional[Any] = None) -> None:
+        """Log an info-level message, optionally including structured data."""
+        if data is None:
+            self._logger.info(message)
+        else:
+            self._logger.info("%s | data=%r", message, data)
+
+    def warning(self, message: str, data: Optional[Any] = None) -> None:
+        """Log a warning-level message, optionally including structured data."""
+        if data is None:
+            self._logger.warning(message)
+        else:
+            self._logger.warning("%s | data=%r", message, data)
+
+    def error(self, message: str, data: Optional[Any] = None) -> None:
+        """Log an error-level message. If an exception-like object is provided include
+        its representation so callers can surface exception information without assuming
+        an active exception context.
+        """
+        if data is None:
+            self._logger.error(message)
+        else:
+            # If data is an exception, include its repr to surface exception details.
+            # We avoid trying to infer traceback objects or call logging.exception
+            # because that relies on an active exception context.
+            self._logger.error("%s | data=%r", message, data)
+
+
+
+##########################################################################################
+# FILE: expense_tracker\controllers\controller.py
+##########################################################################################
+
+from typing import Dict, Any
+
+from domain.transaction_service import TransactionService
+from domain.category_service import CategoryService
+from app_logging import AppLogger
+
+
+class CommandController:
+    """Controller that translates a generic command dict into concrete domain service calls.
+
+    Responsibilities (per manifest):
+    - Validate incoming command against the documented command contract (conservative enforcement).
+    - Dispatch to TransactionService or CategoryService according to command['entity'] and command['action'].
+    - Log intent, validation failures, routing decisions, service errors, and successes via the injected AppLogger.
+    """
+
+    # Embedded conservative command contract (from manifest) used for validation.
+    command_contract = {
+        "type": "object",
+        "required": ["entity", "action"],
+        "properties": {
+            "entity": {"type": "string", "enum": ["transaction", "category"]},
+            "action": {"type": "string", "enum": ["create", "list", "get", "update", "delete"]},
+            "params": {"type": "object"}
+        },
+        "additionalProperties": False,
+    }
+
+    def __init__(
+        self,
+        transaction_service: TransactionService,
+        category_service: CategoryService,
+        logger: AppLogger,
+    ) -> None:
+        # Assign dependencies per manifest
+        self._transaction_service = transaction_service
+        self._category_service = category_service
+        self._logger = logger
+
+    def handle(self, command: Dict[str, Any], data_dir: str) -> dict:
+        """Validate and dispatch a command to the appropriate domain service.
+
+        Returns a dict representing either the service result (if dict it's returned as-is; otherwise wrapped under 'result')
+        or a normalized error shape with an 'error' key.
+        """
+        # Basic structural validation (conservative, implemented without external jsonschema dependency)
+        if not isinstance(command, dict):
+            self._logger.error("Command validation failed: command must be a dict", command)
+            return {"error": "validation_error", "details": "command must be a dict"}
+
+        entity = command.get("entity")
+        action = command.get("action")
+        params = command.get("params", {}) if command.get("params") is not None else {}
+
+        if not isinstance(entity, str) or entity not in ("transaction", "category"):
+            self._logger.error("Command validation failed: invalid or missing 'entity'", {"entity": entity})
+            return {
+                "error": "validation_error",
+                "details": "'entity' must be one of ['transaction', 'category']",
+            }
+
+        if not isinstance(action, str) or action not in ("create", "list", "get", "update", "delete"):
+            self._logger.error("Command validation failed: invalid or missing 'action'", {"action": action})
+            return {
+                "error": "validation_error",
+                "details": "'action' must be one of ['create', 'list', 'get', 'update', 'delete']",
+            }
+
+        if not isinstance(params, dict):
+            self._logger.error("Command validation failed: 'params' must be an object if provided", {"params": params})
+            return {"error": "validation_error", "details": "'params' must be an object if provided"}
+
+        self._logger.debug("Interpreting command", {"entity": entity, "action": action, "params": params})
+
+        # Choose service based on entity
+        try:
+            if entity == "transaction":
+                svc = self._transaction_service
+                if action == "create":
+                    record = params.get("record")
+                    if not isinstance(record, dict) or "id" not in record:
+                        self._logger.error("Create command missing required record or id", {"record": record})
+                        return {
+                            "error": "validation_error",
+                            "details": "create requires params.record with an 'id' field",
+                        }
+                    result = svc.create(record, data_dir)
+
+                elif action == "list":
+                    query = params if isinstance(params, dict) else {}
+                    result = svc.list(query, data_dir)
+
+                elif action == "get":
+                    record_id = params.get("id") or params.get("record_id")
+                    if not isinstance(record_id, str):
+                        self._logger.error("Get command missing record id", {"params": params})
+                        return {
+                            "error": "validation_error",
+                            "details": "get requires params.id or params.record_id",
+                        }
+                    result = svc.get(record_id, data_dir)
+
+                elif action == "update":
+                    record_id = params.get("id") or params.get("record_id")
+                    update_fields = params.get("update_fields")
+                    if not isinstance(record_id, str) or not isinstance(update_fields, dict):
+                        self._logger.error("Update command missing id or update_fields", {"params": params})
+                        return {
+                            "error": "validation_error",
+                            "details": "update requires params.id (or params.record_id) and params.update_fields (dict)",
+                        }
+                    result = svc.update(record_id, update_fields, data_dir)
+
+                elif action == "delete":
+                    record_id = params.get("id") or params.get("record_id")
+                    if not isinstance(record_id, str):
+                        self._logger.error("Delete command missing record id", {"params": params})
+                        return {
+                            "error": "validation_error",
+                            "details": "delete requires params.id or params.record_id",
+                        }
+                    result = svc.delete(record_id, data_dir)
+
+                else:
+                    # Defensive: should not reach due to earlier validation
+                    self._logger.error("Unsupported transaction action", {"action": action})
+                    return {"error": "unsupported_action"}
+
+            else:  # entity == "category"
+                svc = self._category_service
+                if action == "create":
+                    record = params.get("record")
+                    if not isinstance(record, dict) or "id" not in record:
+                        self._logger.error("Create category missing required record or id", {"record": record})
+                        return {
+                            "error": "validation_error",
+                            "details": "create requires params.record with an 'id' field",
+                        }
+                    result = svc.create(record, data_dir)
+
+                elif action == "list":
+                    query = params if isinstance(params, dict) else {}
+                    result = svc.list(query, data_dir)
+
+                elif action == "get":
+                    record_id = params.get("id") or params.get("record_id")
+                    if not isinstance(record_id, str):
+                        self._logger.error("Get category missing record id", {"params": params})
+                        return {
+                            "error": "validation_error",
+                            "details": "get requires params.id or params.record_id",
+                        }
+                    result = svc.get(record_id, data_dir)
+
+                elif action == "update":
+                    record_id = params.get("id") or params.get("record_id")
+                    update_fields = params.get("update_fields")
+                    if not isinstance(record_id, str) or not isinstance(update_fields, dict):
+                        self._logger.error("Update category missing id or update_fields", {"params": params})
+                        return {
+                            "error": "validation_error",
+                            "details": "update requires params.id (or params.record_id) and params.update_fields (dict)",
+                        }
+                    result = svc.update(record_id, update_fields, data_dir)
+
+                elif action == "delete":
+                    record_id = params.get("id") or params.get("record_id")
+                    if not isinstance(record_id, str):
+                        self._logger.error("Delete category missing record id", {"params": params})
+                        return {
+                            "error": "validation_error",
+                            "details": "delete requires params.id or params.record_id",
+                        }
+                    result = svc.delete(record_id, data_dir)
+
+                else:
+                    self._logger.error("Unsupported category action", {"action": action})
+                    return {"error": "unsupported_action"}
+
+        except Exception as exc:  # Log and normalize unexpected service errors
+            # Avoid exposing internal exception traces in normal responses; include message for diagnostics
+            self._logger.error("Service call failed during command handling", {"exception": str(exc)})
+            return {"error": "internal_error", "details": str(exc)}
+
+        # Log success and normalize return shape to a dict per manifest guidance
+        self._logger.info("Command dispatched to service", {"entity": entity, "action": action})
+
+        if isinstance(result, dict):
+            return result
+        return {"result": result}
+
+
+
+##########################################################################################
+# FILE: expense_tracker\domain\category_service.py
+##########################################################################################
+
+from typing import List, Dict, Any, Optional
+
+from repository.category_repository import CategoryRepository
+from app_logging import AppLogger
+
+
+class CategoryService:
+    """Domain service responsible for CRUD operations over category entities.
+
+    Behavior follows the manifest: delegates persistence to CategoryRepository
+    and uses the injected AppLogger for logging. Methods accept data_dir and
+    forward it to the repository. Validation and conflict conditions raise
+    exceptions (deterministic choice documented below).
+
+    Notes on deterministic error handling (chosen because the manifest allows
+    either returning or raising errors but does not prescribe a concrete error
+    contract):
+      - Validation failures (missing 'id') raise ValueError.
+      - Conflicts (duplicate id on create) raise ValueError.
+      - Not-found on update raises KeyError.
+
+    These choices are conservative and deterministic; callers may catch and
+    translate these exceptions into application-level error payloads as needed.
+    """
+
+    def __init__(self, repository: CategoryRepository, logger: AppLogger) -> None:
+        """Initialize the service with its repository and logger.
+
+        Do not perform I/O or business logic in constructor; just assign
+        dependencies per manifest guidance.
+        """
+        self._repository = repository
+        self._logger = logger
+
+    def create(self, category_params: Dict[str, Any], data_dir: str) -> Dict[str, Any]:
+        """Create a new category.
+
+        Raises:
+            ValueError: if required validation fails or id conflict detected.
+        Returns the created category dict on success.
+        """
+        # Validate required 'id' per identity policy
+        if not isinstance(category_params, dict) or 'id' not in category_params:
+            self._logger.error("Category create failed: missing 'id' in params", category_params)
+            raise ValueError("'id' is required in category_params")
+
+        existing = self._repository.load_all(data_dir)
+        # Check id uniqueness
+        new_id = category_params['id']
+        for rec in existing:
+            if rec.get('id') == new_id:
+                self._logger.error("Category create conflict: id already exists", {'id': new_id})
+                raise ValueError(f"Category with id '{new_id}' already exists")
+
+        # Append and persist
+        updated = list(existing)  # shallow copy
+        updated.append(category_params)
+        self._repository.save_all(data_dir, updated)
+        self._logger.info("Category created", {'id': new_id})
+        return category_params
+
+    def list(self, query_params: Dict[str, Any], data_dir: str) -> List[Dict[str, Any]]:
+        """Return list of categories, optionally filtered by simple equality.
+
+        Filtering implementation (conservative): for each key/value in
+        query_params, include records where record.get(key) == value. This is a
+        simple in-memory filter and does not modify persisted data.
+        """
+        all_categories = self._repository.load_all(data_dir)
+        if not query_params:
+            self._logger.debug("Listing all categories", {'count': len(all_categories)})
+            return all_categories
+
+        # Apply simple equality-based filtering
+        def matches(record: Dict[str, Any]) -> bool:
+            for k, v in query_params.items():
+                if record.get(k) != v:
+                    return False
+            return True
+
+        filtered = [r for r in all_categories if matches(r)]
+        self._logger.debug("Listing categories with filter", {'requested': query_params, 'count': len(filtered)})
+        return filtered
+
+    def get(self, record_id: str, data_dir: str) -> Optional[Dict[str, Any]]:
+        """Retrieve a single category by id. Returns None if not found."""
+        all_categories = self._repository.load_all(data_dir)
+        for rec in all_categories:
+            if rec.get('id') == record_id:
+                return rec
+
+        self._logger.info("Category not found", {'id': record_id})
+        return None
+
+    def update(self, record_id: str, update_fields: Dict[str, Any], data_dir: str) -> Dict[str, Any]:
+        """Update an existing category and persist changes.
+
+        Raises:
+            KeyError: if the target record is not found.
+        Returns the updated record on success.
+        """
+        all_categories = self._repository.load_all(data_dir)
+        updated = False
+        new_list: List[Dict[str, Any]] = []
+        updated_record: Optional[Dict[str, Any]] = None
+
+        for rec in all_categories:
+            if rec.get('id') == record_id:
+                # Do not allow changing the id via update_fields unless domain
+                # contract explicitly allows it; ignore 'id' in update_fields.
+                merged = dict(rec)
+                for k, v in update_fields.items():
+                    if k == 'id':
+                        continue
+                    merged[k] = v
+                updated_record = merged
+                new_list.append(merged)
+                updated = True
+            else:
+                new_list.append(rec)
+
+        if not updated or updated_record is None:
+            self._logger.info("Category update failed: not found", {'id': record_id})
+            raise KeyError(f"Category with id '{record_id}' not found")
+
+        self._repository.save_all(data_dir, new_list)
+        self._logger.info("Category updated", {'id': record_id})
+        return updated_record
+
+    def delete(self, record_id: str, data_dir: str) -> bool:
+        """Delete a category by id. Returns True if removed, False if not found."""
+        all_categories = self._repository.load_all(data_dir)
+        new_list: List[Dict[str, Any]] = []
+        removed = False
+        for rec in all_categories:
+            if rec.get('id') == record_id:
+                removed = True
+                continue
+            new_list.append(rec)
+
+        if removed:
+            self._repository.save_all(data_dir, new_list)
+            self._logger.info("Category deleted", {'id': record_id})
+            return True
+
+        self._logger.info("Category delete attempted but not found", {'id': record_id})
+        return False
+
+
+
+##########################################################################################
+# FILE: expense_tracker\domain\transaction_service.py
+##########################################################################################
+
+from typing import List, Dict, Any, Optional
+
+from repository.transaction_repository import TransactionRepository
+from app_logging import AppLogger
+
+
+class TransactionService:
+    """Domain service responsible for transaction CRUD semantics.
+
+    Responsibilities (per manifest):
+    - Enforce caller-provided 'id' identity policy and uniqueness on create.
+    - Delegate all persistence to the injected TransactionRepository.
+    - Use the injected AppLogger for all logging.
+    """
+
+    def __init__(self, repository: TransactionRepository, logger: AppLogger) -> None:
+        """Construct TransactionService with repository and logger dependencies."""
+        self._repository = repository
+        self._logger = logger
+
+    def create(self, transaction_params: Dict[str, Any], data_dir: str) -> dict:
+        """Create a new transaction.
+
+        Validates presence of 'id' per identity policy, enforces uniqueness, persists via repository,
+        and returns the created record or a structured error dict on validation/conflict.
+        """
+        # Validate required identity field
+        if not isinstance(transaction_params, dict) or "id" not in transaction_params:
+            self._logger.error("Transaction create validation failed: missing id", transaction_params)
+            return {"error": "validation", "message": "Missing required field: id"}
+
+        record_id = transaction_params["id"]
+
+        # Load existing transactions
+        try:
+            existing = self._repository.load_all(data_dir) or []
+        except Exception as exc:  # propagate repository exceptions after logging
+            self._logger.error("Failed to load transactions for create", {"exception": exc})
+            raise
+
+        # Check uniqueness
+        for rec in existing:
+            if rec.get("id") == record_id:
+                self._logger.error("Transaction id conflict on create", {"id": record_id})
+                return {"error": "conflict", "message": f"Transaction with id {record_id} already exists"}
+
+        # Append and persist
+        new_record = dict(transaction_params)  # shallow copy to avoid external mutation
+        updated = list(existing) + [new_record]
+        try:
+            self._repository.save_all(data_dir, updated)
+        except Exception as exc:
+            self._logger.error("Failed to save transactions on create", {"exception": exc})
+            raise
+
+        self._logger.info("Transaction created", {"id": record_id})
+        return new_record
+
+    def list(self, query_params: Dict[str, Any], data_dir: str) -> List[Dict[str, Any]]:
+        """Return a list of transactions, optionally filtered in-memory by simple equality matching.
+
+        Conservative in-memory filtering: for each key in query_params, keep records where
+        record.get(key) == query_params[key]. If query_params is falsy, return all records.
+        """
+        try:
+            records = self._repository.load_all(data_dir) or []
+        except Exception as exc:
+            self._logger.error("Failed to load transactions for list", {"exception": exc})
+            raise
+
+        if query_params:
+            def matches(rec: Dict[str, Any]) -> bool:
+                for k, v in query_params.items():
+                    # Skip None filters explicitly (caller may pass None meaning no-op)
+                    if v is None:
+                        continue
+                    if rec.get(k) != v:
+                        return False
+                return True
+
+            filtered = [r for r in records if matches(r)]
+        else:
+            filtered = list(records)
+
+        self._logger.debug("Listed transactions", {"count": len(filtered)})
+        return filtered
+
+    def get(self, record_id: str, data_dir: str) -> Optional[Dict[str, Any]]:
+        """Return the transaction dict with matching id or None if not found."""
+        try:
+            records = self._repository.load_all(data_dir) or []
+        except Exception as exc:
+            self._logger.error("Failed to load transactions for get", {"exception": exc})
+            raise
+
+        for rec in records:
+            if rec.get("id") == record_id:
+                return rec
+
+        self._logger.info("Transaction not found", {"id": record_id})
+        return None
+
+    def update(self, record_id: str, update_fields: Dict[str, Any], data_dir: str) -> dict:
+        """Update fields of an existing transaction and persist the collection.
+
+        Does not allow changing the 'id' field.
+        Returns the updated record on success or a structured error dict if not found.
+        """
+        try:
+            records = self._repository.load_all(data_dir) or []
+        except Exception as exc:
+            self._logger.error("Failed to load transactions for update", {"exception": exc})
+            raise
+
+        found = False
+        updated_record: Optional[Dict[str, Any]] = None
+        updated_list: List[Dict[str, Any]] = []
+
+        for rec in records:
+            if rec.get("id") == record_id:
+                found = True
+                # Apply updates conservatively; do not change id
+                new_rec = dict(rec)
+                for k, v in (update_fields or {}).items():
+                    if k == "id":
+                        continue
+                    new_rec[k] = v
+                updated_record = new_rec
+                updated_list.append(new_rec)
+            else:
+                updated_list.append(rec)
+
+        if not found:
+            self._logger.info("Transaction update attempted but not found", {"id": record_id})
+            return {"error": "not_found", "message": f"Transaction with id {record_id} not found"}
+
+        try:
+            self._repository.save_all(data_dir, updated_list)
+        except Exception as exc:
+            self._logger.error("Failed to save transactions on update", {"exception": exc})
+            raise
+
+        self._logger.info("Transaction updated", {"id": record_id})
+        # updated_record is guaranteed to be set when found is True
+        return updated_record or {}
+
+    def delete(self, record_id: str, data_dir: str) -> bool:
+        """Delete the transaction with the given id. Return True if deleted, False if not found."""
+        try:
+            records = self._repository.load_all(data_dir) or []
+        except Exception as exc:
+            self._logger.error("Failed to load transactions for delete", {"exception": exc})
+            raise
+
+        new_list: List[Dict[str, Any]] = []
+        deleted = False
+        for rec in records:
+            if rec.get("id") == record_id:
+                deleted = True
+            else:
+                new_list.append(rec)
+
+        if not deleted:
+            self._logger.info("Transaction delete attempted but not found", {"id": record_id})
+            return False
+
+        try:
+            self._repository.save_all(data_dir, new_list)
+        except Exception as exc:
+            self._logger.error("Failed to save transactions on delete", {"exception": exc})
+            raise
+
+        self._logger.info("Transaction deleted", {"id": record_id})
+        return True
+
+
+
+##########################################################################################
+# FILE: expense_tracker\main.py
+##########################################################################################
+
+from typing import Any
+import json
+
+from app.application import Application
+from app_logging import AppLogger
+
+
+class Main:
+    """Entry-point orchestrator for the expense_tracker application.
+
+    Responsibilities:
+    - Hold injected Application and AppLogger instances.
+    - Parse a single JSON command string into a dict and delegate handling to Application.run.
+
+    Per manifest: constructor receives Application and AppLogger via constructor injection.
+    """
+
+    def __init__(self, application: Application, logger: AppLogger) -> None:
+        """Initialize Main with required dependencies.
+
+        Do only trivial assignments; do not perform I/O or business logic here.
+        """
+        self._application = application
+        self._logger = logger
+
+    def invoke(self, json_command: str, data_dir: str) -> dict:
+        """Parse a JSON command string and delegate to the Application.
+
+        Steps (as implemented):
+        - Log startup and the received command via the injected AppLogger.
+        - Parse json_command into a dict called `command` using json.loads.
+          If parsing fails or the parsed value is not a dict, log an error and raise.
+        - Call self._application.run(command, data_dir) and return its result.
+        """
+        # Log startup and received command
+        try:
+            # Use the logger's info method; include the raw command for diagnostics.
+            # The second parameter is optional structured data per AppLogger contract.
+            self._logger.info("Main.invoke: received json command", {"json_command": json_command})
+        except Exception:
+            # Keep logging best-effort non-fatal here; do not prevent parsing below if logging fails.
+            pass
+
+        # Parse JSON input conservatively
+        try:
+            command = json.loads(json_command)
+        except Exception as exc:
+            # Log parse error and re-raise to surface the failure to the caller
+            try:
+                self._logger.error("Main.invoke: failed to parse json_command", {"error": str(exc), "json_command": json_command})
+            except Exception:
+                pass
+            raise
+
+        # Ensure the parsed command is a mapping/dict as expected by downstream components
+        if not isinstance(command, dict):
+            try:
+                self._logger.error("Main.invoke: parsed command is not a JSON object", {"parsed_type": type(command).__name__, "command": command})
+            except Exception:
+                pass
+            raise ValueError("Parsed json_command must be a JSON object (mapping) representing the command")
+
+        # Delegate to Application for handling; Application.run is expected to return a dict
+        result = self._application.run(command, data_dir)
+        return result
+
+
+
+##########################################################################################
+# FILE: expense_tracker\repository\category_repository.py
+##########################################################################################
+
+from storage.json_storage import JsonStorage
+from app_logging import AppLogger
+from typing import List, Dict, Any
+import os
+
+
+class CategoryRepository:
+    """Repository for category entities persisted as JSON in a fixed file 'categories.json'.
+
+    Responsibilities:
+    - Compute the file path by joining the provided data_dir with 'categories.json'.
+    - Delegate reads/writes to the injected JsonStorage instance.
+    - Use the injected AppLogger for logging; do not use stdlib logging directly.
+    """
+
+    _storage: JsonStorage
+    _logger: AppLogger
+
+    def __init__(self, storage: JsonStorage, logger: AppLogger) -> None:
+        """Initialize repository with storage and logger dependencies.
+
+        Do not perform I/O in the constructor.
+        """
+        self._storage = storage
+        self._logger = logger
+
+    def load_all(self, data_dir: str) -> List[Dict[str, Any]]:
+        """Load all category records from the categories.json file.
+
+        Returns an empty list when the file is missing or storage returns None (bootstrap-safe read).
+        """
+        file_path = os.path.join(data_dir, "categories.json")
+        try:
+            raw = self._storage.read(file_path)
+        except Exception as exc:  # propagate storage errors after logging
+            self._logger.error("Failed to read categories file", {"file_path": file_path, "error": str(exc)})
+            raise
+
+        if raw is None:
+            # Missing file -> bootstrap-safe empty collection
+            self._logger.debug("No categories file found; returning empty list", {"file_path": file_path})
+            return []
+
+        if not isinstance(raw, list):
+            # Conservatively treat unexpected shapes as empty; log for operators to investigate
+            self._logger.debug("Categories data is not a list; returning empty list", {"file_path": file_path, "type": type(raw).__name__})
+            return []
+
+        self._logger.debug("Loaded categories", {"count": len(raw), "file_path": file_path})
+        # No domain-model conversion is performed; return JSON-serializable dicts
+        return raw
+
+    def save_all(self, data_dir: str, categories: List[Dict[str, Any]]) -> None:
+        """Persist the provided list of category records atomically via JsonStorage.
+
+        Ensures each record is a dict and includes the required 'id' field per the persistence schema before delegating to storage.
+        """
+        file_path = os.path.join(data_dir, "categories.json")
+
+        if not isinstance(categories, list):
+            raise TypeError("categories must be a list of dicts")
+
+        serializable_data: List[Dict[str, Any]] = []
+        for idx, rec in enumerate(categories):
+            if not isinstance(rec, dict):
+                self._logger.error("Category record is not a dict and cannot be serialized", {"index": idx, "file_path": file_path})
+                raise TypeError("Each category record must be a dict")
+            if "id" not in rec:
+                self._logger.error("Category record missing required 'id' field", {"index": idx, "record": rec, "file_path": file_path})
+                raise ValueError("Each category record must contain an 'id' field")
+            serializable_data.append(rec)
+
+        try:
+            self._storage.write(file_path, serializable_data)
+        except Exception as exc:
+            self._logger.error("Failed to write categories file", {"file_path": file_path, "error": str(exc)})
+            raise
+
+        self._logger.debug("Saved categories", {"count": len(serializable_data), "file_path": file_path})
+
+
+
+##########################################################################################
+# FILE: expense_tracker\repository\transaction_repository.py
+##########################################################################################
+
+from typing import List, Dict, Any
+import os
+
+from storage.json_storage import JsonStorage
+from app_logging import AppLogger
+
+
+class TransactionRepository:
+    """Repository responsible for loading and saving transactions.json under a provided data_dir.
+
+    Responsibilities follow the manifest: compute the concrete file path by joining data_dir with
+    'transactions.json', delegate reads/writes to the injected JsonStorage, and use the injected
+    AppLogger for logging. No file I/O is performed directly by this class.
+    """
+
+    def __init__(self, storage: JsonStorage, logger: AppLogger) -> None:
+        """Initialize the repository with its dependencies.
+
+        Do not perform I/O in the constructor.
+        """
+        self._storage = storage
+        self._logger = logger
+
+    def load_all(self, data_dir: str) -> List[Dict[str, Any]]:
+        """Load all transaction records from the data directory.
+
+        Returns a list of dicts. If the storage indicates no file (None) or data is missing/malformed,
+        an empty list is returned (bootstrap-safe read). Access is logged via the injected logger.
+        """
+        file_path = os.path.join(data_dir, "transactions.json")
+        try:
+            raw = self._storage.read(file_path)
+        except Exception as e:
+            # Log and propagate the error; callers may handle exceptions as needed.
+            self._logger.error("Failed to read transactions file", {"file_path": file_path, "error": str(e)})
+            raise
+
+        if raw is None:
+            self._logger.debug("No transactions file found; returning empty list", {"file_path": file_path})
+            return []
+
+        if not isinstance(raw, list):
+            # Unexpected shape from storage; log and return empty list to remain bootstrap-safe.
+            self._logger.error("Unexpected data shape for transactions; expected list", {"file_path": file_path, "type": type(raw).__name__})
+            return []
+
+        records: List[Dict[str, Any]] = []
+        for idx, item in enumerate(raw):
+            if isinstance(item, dict):
+                records.append(item)
+            else:
+                # Convert non-dict items conservatively into a dict wrapper so callers receive a consistent type.
+                # This is a minimal deterministic conversion to satisfy the manifest's expectation of dicts.
+                self._logger.debug("Converting non-dict transaction item to dict wrapper", {"index": idx, "file_path": file_path})
+                records.append({"_raw": item})
+
+        self._logger.debug("Loaded transactions", {"file_path": file_path, "count": len(records)})
+        return records
+
+    def save_all(self, data_dir: str, transactions: List[Dict[str, Any]]) -> None:
+        """Persist the provided list of transaction dicts to transactions.json under data_dir.
+
+        Ensures each record includes the required 'id' field before delegating to storage.write.
+        Logs success or errors via the injected logger. The storage adapter is responsible for atomic
+        persistence semantics.
+        """
+        file_path = os.path.join(data_dir, "transactions.json")
+
+        # Validate records satisfy required schema (each must have an 'id')
+        for idx, rec in enumerate(transactions):
+            if not isinstance(rec, dict):
+                msg = "Transaction record is not a dict"
+                self._logger.error(msg, {"index": idx, "file_path": file_path, "record_type": type(rec).__name__})
+                raise ValueError(f"Transaction at index {idx} is not a dict")
+            if "id" not in rec:
+                msg = "Transaction record missing required 'id' field"
+                self._logger.error(msg, {"index": idx, "file_path": file_path, "record": rec})
+                raise ValueError(f"Transaction at index {idx} missing required 'id' field")
+
+        serializable_data = transactions  # Assume callers supply JSON-serializable primitives per manifest
+
+        try:
+            self._storage.write(file_path, serializable_data)
+            self._logger.debug("Saved transactions", {"file_path": file_path, "count": len(transactions)})
+        except Exception as e:
+            # Log and re-raise so callers can react; storage.write is expected to raise on failure.
+            self._logger.error("Failed to write transactions file", {"file_path": file_path, "error": str(e)})
+            raise
+
+
+
+##########################################################################################
+# FILE: expense_tracker\storage\json_storage.py
+##########################################################################################
+
+from typing import Any, Optional
+
+from app_logging import AppLogger
+import json
+import tempfile
+import os
+import io
+
+
+class JsonStorage:
+    """Storage adapter that reads and writes JSON-serializable structures
+
+    Responsibilities (per manifest):
+    - read(file_path) -> Optional[Any]: return parsed JSON or None if missing
+    - write(file_path, data): atomic write using a temporary file in same directory
+
+    Uses injected AppLogger for logging.
+    """
+
+    def __init__(self, logger: AppLogger) -> None:
+        # Store injected logger. Do not perform I/O here.
+        self._logger = logger
+
+    def read(self, file_path: str) -> Optional[Any]:
+        """Read and parse JSON from file_path.
+
+        Returns the parsed JSON-serializable structure, or None if file is missing.
+        On I/O or parse errors, logs and re-raises the exception.
+        """
+        try:
+            # Use io.open to be explicit about encoding
+            with io.open(file_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                return data
+        except FileNotFoundError:
+            # Missing file is treated as bootstrap-safe empty result
+            try:
+                self._logger.debug("json_storage.read: file not found, returning None", {"file_path": file_path})
+            except Exception:
+                # Logging should not break read semantics; swallow logger errors
+                pass
+            return None
+        except Exception as exc:
+            # Log parse or I/O errors and propagate
+            try:
+                self._logger.error("json_storage.read: error reading or parsing file", {"file_path": file_path, "error": str(exc)})
+            except Exception:
+                pass
+            raise
+
+    def write(self, file_path: str, data: Any) -> None:
+        """Atomically write JSON-serializable `data` to `file_path`.
+
+        Steps:
+        1) Serialize to JSON text using json.dumps(..., ensure_ascii=False, separators=(',', ':'))
+        2) Create a temporary file in the same directory using tempfile.NamedTemporaryFile(delete=False)
+        3) Write bytes, flush, and fsync
+        4) Atomically replace target with os.replace
+        On error, attempts to clean up temporary file and propagates the exception.
+        """
+        dir_name = os.path.dirname(file_path) or "."
+        tmp_file_path = None
+        try:
+            # Ensure directory exists to avoid needless failures when writing
+            os.makedirs(dir_name, exist_ok=True)
+
+            # Serialize to JSON text and encode to bytes
+            json_text = json.dumps(data, ensure_ascii=False, separators=(",", ":"))
+            json_bytes = json_text.encode("utf-8")
+
+            # Create a temporary file in the same directory
+            with tempfile.NamedTemporaryFile(mode="wb", delete=False, dir=dir_name) as tmpf:
+                tmp_file_path = tmpf.name
+                tmpf.write(json_bytes)
+                tmpf.flush()
+                try:
+                    os.fsync(tmpf.fileno())
+                except Exception:
+                    # If fsync is not available or fails, log and continue to attempt atomic replace
+                    try:
+                        self._logger.debug("json_storage.write: fsync failed or not supported", {"tmp_path": tmp_file_path})
+                    except Exception:
+                        pass
+
+            # Atomically replace the target file with the temporary file
+            os.replace(tmp_file_path, file_path)
+            tmp_file_path = None  # ownership transferred; avoid removing in finally
+
+            try:
+                self._logger.debug("json_storage.write: successfully wrote file", {"file_path": file_path})
+            except Exception:
+                pass
+
+        except Exception as exc:
+            # Attempt cleanup of temp file if it still exists
+            if tmp_file_path and os.path.exists(tmp_file_path):
+                try:
+                    os.remove(tmp_file_path)
+                except Exception:
+                    try:
+                        self._logger.error("json_storage.write: failed to remove temporary file", {"tmp_path": tmp_file_path, "error": str(exc)})
+                    except Exception:
+                        pass
+            try:
+                self._logger.error("json_storage.write: error during write", {"file_path": file_path, "error": str(exc)})
+            except Exception:
+                pass
+            raise
+
+

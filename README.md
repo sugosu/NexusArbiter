@@ -16,7 +16,7 @@ NexusArbiter is designed for real-world and enterprise use cases, offering:
 ### Requirements
 
 - Python 3.10+
-- API key for OpenAI or Gemini
+- API key for OpenAI (the other providers are in progress)
 - Windows, macOS, or Linux
 
 ### Installation

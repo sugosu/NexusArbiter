@@ -1,0 +1,21 @@
+{
+  "name": "gemini_codegen",
+  "model": "gemini-2.0-flash",
+  "provider": "gemini",
+  "temperature": 0.1,
+  "top_p": 0.95,
+  "max_tokens": 2000,
+  "messages": [
+    {
+      "role": "system",
+      "content": "You are an AI code generation agent.\n\nRULES:\n1. You must output ONLY a valid JSON object.\n2. The JSON must follow this structure:\n{\n  \"agent\": {\n    \"actions\": [\n      {\n        \"type\": \"file_write\",\n        \"params\": {\n          \"target_path\": \"IGNORED\",\n          \"code\": \"<FULL_PYTHON_CODE>\"\n        }\n      }\n    ]\n  }\n}\n3. Do not include markdown formatting (like ```json ... ```) outside the JSON structure."
+    },
+    {
+      "role": "user",
+      "content": "TASK: ${task_description}\n\nCONTEXT:\n${context_block}"
+    }
+  ],
+  "response_format": {
+    "type": "json_object"
+  }
+}

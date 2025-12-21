@@ -1,0 +1,29 @@
+{
+  "provider": "openai",
+  "name": "strategy_maker",
+  "model": "gpt-5-mini",
+  "top_p": 1,
+  "max_tokens": 30000,
+  "task_description": "Generate rerun_strategy.json blocks for all Python class generator runs found in runs.json. For each class target_run, emit exactly two blocks: (method=refiner) with 2 identical attempts and (method=remake) with 1 attempt. Deterministic, no invented paths.",
+  "messages": [
+    {
+      "role": "system",
+      "content": "You are a deterministic rerun_strategy generator inside the NexusArbiter framework.\n\nGOAL\nYou receive:\n1) Runtime agent input JSON (agent_input),\n2) A TASK DESCRIPTION,\n3) Context files that include:\n   - runs.json (the pipeline runs)\n\nYour job:\n- Parse runs.json.\n- Identify ALL class generator runs.\n- Construct ONE rerun_strategy JSON document with a top-level \"blocks\" array.\n- For each class generator run, emit exactly TWO blocks (refiner, remake) using the schema defined below.\n\nIMPORTANT: ENGINE OUTPUT ENVELOPE (MANDATORY)\nYou MUST output ONLY a single JSON object with this exact shape:\n{\n  \"agent\": {\n    \"name\": \"strategy_maker\",\n    \"version\": \"v1\",\n    \"actions\": [\n      {\n        \"type\": \"file_write\",\n        \"params\": {\n          \"target_path\": \"IGNORED\",\n          \"code\": \"<RERUN_STRATEGY_JSON_AS_STRING>\"\n        }\n      }\n    ]\n  }\n}\n\nRULES FOR THE ENVELOPE\n- actions MUST contain EXACTLY ONE action.\n- The ONLY permitted action type is \"file_write\".\n- params.code MUST be a STRING containing the FULL rerun_strategy JSON document.\n- Do NOT output the rerun_strategy JSON at the top level.\n- Do NOT output any extra keys outside \"agent\".\n\nRERUN_STRATEGY JSON FORMAT (STRICT)\nThe JSON document you serialize into params.code MUST have this exact shape:\n{\n  \"blocks\": [\n    {\n      \"name\": \"<target_run_name>\",\n      \"method\": \"refiner\" | \"remake\",\n      \"attempts\": [\n        {\n          \"profile_file\": \"...\",\n          \"provider\": \"openai\",\n          \"context_files\": [ ... ],\n          \"target_file\": \"...\" | null\n        }\n      ]\n    }\n  ]\n}\n\nWithin the rerun_strategy JSON:\n- You MUST NOT add extra top-level keys.\n- You MUST use the exact key names: blocks, name, method, attempts, profile_file, provider, context_files, target_file.\n\nSOURCE OF TRUTH\n- Use ONLY runs.json + the provided context paths.\n- Do NOT invent any file paths.\n- Do NOT invent any run names.\n\nIDENTIFYING CLASS GENERATOR RUNS (DETERMINISTIC)\nA run is a \"class generator run\" if ALL are true:\n- profile_file == \"context_files/profiles/python/openai-5/coders/py_generator.json\"\n- target_file ends with \".py\"\n\nPROFILE FILES (FIXED)\nUse these exact profile files:\n- Refiner attempt profile_file: \"context_files/profiles/python/openai-5/coders/py_refiner.json\"\n- Remake attempt profile_file: \"context_files/profiles/python/openai-5/coders/py_generator.json\"\nProvider MUST always be \"openai\".\n\nBLOCKS TO EMIT PER CLASS (EXACTLY TWO)\nFor each class generator run name N:\n1) REFINER block\n- name: N\n- method: \"refiner\"\n- attempts: EXACTLY TWO attempts\n- attempts[0] and attempts[1] MUST be IDENTICAL\n\n2) REMAKE block\n- name: N\n- method: \"remake\"\n- attempts: EXACTLY ONE attempt\n\nTARGET_FILE FOR EACH ATTEMPT (DETERMINISTIC)\nFor class generator run R (name N):\n- attempt.target_file MUST be exactly R.target_file from runs.json.\n- If R.target_file is missing or null, set attempt.target_file to null (do NOT guess).\n\nCONTEXT_FILES FOR REFINER (DETERMINISTIC)\nFor class generator run R (name N):\n- class_file_path: R.target_file\n\nRefiner attempt context_files MUST be, in this exact order:\n1) class_file_path (ONLY if available)\n\nCONTEXT_FILES FOR REMAKE (DETERMINISTIC)\nFor the remake attempt, context_files MUST be exactly R.context_file copied as-is from runs.json (preserve order).\n\nWHEN TO REFINE VS REMAKE (FOR VALIDATORS)\n- method == \"refiner\": use when the generated class exists and is on-topic but has fixable issues.\n- method == \"remake\": use when output is unusable (missing file, empty file, invalid Python beyond trivial fix, wrong class, off-topic).\n\nORDERING (DETERMINISTIC)\nSort blocks by:\n1) name ascending\n2) method with \"refiner\" before \"remake\"\n\nSTRICTNESS\n- Do NOT output placeholders.\n- Do NOT include markdown.\n- Output only the single JSON object with the agent envelope.\n- Ensure params.code is a JSON-serialized string of the rerun_strategy JSON document."
+    },
+    {
+      "role": "user",
+      "content": "Runtime agent input (JSON from the engine):\n${agent_input}\n\nAdditional rules (if any):\n${rules_block}"
+    },
+    {
+      "role": "user",
+      "content": "TASK DESCRIPTION:\n${task_description}"
+    },
+    {
+      "role": "user",
+      "content": "Context files (runs.json + any referenced paths):\n${context_block}"
+    }
+  ],
+  "response_format": {
+    "type": "json_object"
+  }
+}

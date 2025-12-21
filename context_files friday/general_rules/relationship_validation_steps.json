@@ -1,0 +1,36 @@
+{
+  "validation_checks": [
+    {
+      "name": "Check unique class identifiers",
+      "purpose": "Ensure every class has a unique `id` so that downstream agents can reference components unambiguously."
+    },
+    {
+      "name": "Check coherence of id, file_path, and class_name",
+      "purpose": "Verify that each class ID corresponds logically to its file path and class name, ensuring a stable mapping for code generation."
+    },
+    {
+      "name": "Check symmetry between depends_on and used_by",
+      "purpose": "Confirm that dependency relationships are correctly mirrored: if A depends on B, then B must list A in used_by, maintaining directional consistency."
+    },
+    {
+      "name": "Check interactions align with depends_on",
+      "purpose": "Validate that classes only declare interactions with components they explicitly depend on, preventing hidden or impossible relationships."
+    },
+    {
+      "name": "Verify domain model passivity",
+      "purpose": "Ensure domain model classes declare no outward interactions or dependencies, matching architectural rules for passive data holders."
+    },
+    {
+  "name": "Validate architectural layering",
+  "purpose": "Check that component relationships follow the intended top-down flow (Main → Service → Repository → Storage) with no forbidden upward or lateral dependencies."
+},
+    {
+      "name": "Check absence of reverse or symmetric interactions",
+      "purpose": "Ensure no class incorrectly declares reciprocal interactions or dependencies unless explicitly allowed by rules."
+    },
+    {
+      "name": "Validate compliance with relationship ruleset",
+      "purpose": "Verify that the relationship object follows all defined directionality, interaction, and domain model rules to maintain a predictable architecture."
+    }
+  ]
+}

@@ -6,54 +6,86 @@
       "The entry point class is responsible for wiring dependencies and starting the application.",
       "The entry point MUST NOT contain business logic; it only orchestrates initialization and invokes the top-level operation."
     ],
-
     "directionality_rules": [
       "All dependencies MUST be directed caller → callee.",
       "If class A invokes a method on class B at runtime, A.depends_on MUST include B.",
       "Reverse or bidirectional dependencies MUST NOT be invented."
     ],
-
     "interaction_rules": [
       "Only the calling class may declare an interaction.",
       "An interaction MUST correspond to a real runtime method invocation.",
-      "Every interaction target MUST also appear in depends_on.",
-      "Interactions MUST NOT exist without a corresponding depends_on entry."
+      "Every interaction target MUST also appear in depends_on, EXCEPT targets whose id starts with 'external.' (external targets MUST NOT appear in depends_on)",
+      "Interactions MUST NOT exist without a corresponding depends_on entry.",
+      "For interactions whose target_id starts with 'external.', the target MUST NOT be included in depends_on and is exempt from the 'target must appear in depends_on' rule."
     ],
-
     "dependency_semantics_rules": [
       "depends_on MUST represent runtime call dependencies only.",
       "Type-only references (annotations, data shapes, serialization) MUST NOT appear in depends_on.",
       "If a class is referenced only as a data type, it MUST be excluded from depends_on."
     ],
-
     "domain_model_rules": [
       "Domain model classes MUST be passive data holders.",
       "Domain models MUST NOT declare interactions.",
       "Domain models MUST NOT appear in depends_on unless their methods are invoked at runtime."
     ],
-
     "parameter_ownership_rules": [
       "If an interaction crosses a component boundary using parameters (e.g., path, config, locale), parameter ownership MUST be explicit.",
       "Each such parameter MUST be modeled as either: (a) constructor-injected state, (b) method-level parameter, or (c) constant owned by a specific component.",
       "A generator MUST NOT invent parameter flow or ownership not described in relationship.json."
     ],
-
     "consistency_rules": [
       "depends_on and interactions MUST describe the same directed call graph.",
       "There MUST be no interaction whose target is missing from depends_on.",
       "There MUST be no depends_on entry without at least one corresponding interaction."
     ],
-
     "derived_field_rules": [
       "used_by is a derived field and MUST NOT be authored by generators.",
       "If present, used_by MUST be ignored and recomputed from depends_on."
     ],
-
+    "role_rules": [
+      "Allowed roles are: entry_point, app, controller, domain_service, repository, storage_adapter, logging_adapter, domain_model.",
+      "Generators MUST NOT invent additional roles unless explicitly required by the task description."
+    ],
     "example_usage_rules": [
       "Example relationship JSON files are FORMAT-ONLY.",
       "Examples MUST NOT influence architecture, layering, naming, or dependency choices.",
       "No module paths, class roles, or patterns from examples may be copied."
     ],
+    "layering_rules": [
+      "The architecture MUST include at least one class with each of these roles: entry_point, app, controller, domain_service, repository, storage_adapter.",
+      "The entry_point class MUST depend_on at least one app class, MUST interact with exactly one app class as the top-level start point, and MUST NOT invoke services or repositories directly.",
+      "The app class MUST depend_on at least one controller class, MUST interact with exactly one controller class as its dispatch entry, and MUST NOT invoke repositories or storage adapters directly.",
+      "The controller class MUST depend_on one or more service classes and MUST interact with them to perform operations.",
+      "Each service class MUST depend_on one or more repository classes and MUST interact with them for persistence operations.",
+      "Each repository class MUST depend_on a storage_adapter and MUST interact with it for read/write.",
+      "Dependencies MUST NOT skip layers (e.g., entry_point MUST NOT call service/repository directly; controller MUST NOT call storage directly)."
+    ],
+    "external_interaction_rules": [
+      "The relationship model MAY include external, non-generated nodes that represent real-world actors or system boundaries (e.g., a human user invoking the program).",
+      "External nodes MUST be identified by id prefix 'external.' and MUST NOT be treated as classes (file_path MUST be null and class_name MUST be null).",
+      "External nodes MUST NOT appear in depends_on of any class (they are not runtime call dependencies).",
+      "External nodes MAY appear only as interaction targets to document input sources or boundary signals.",
+      "Only the entry_point class may declare interactions targeting external nodes (e.g., external.User).",
+      "External node interactions MUST describe the input channel precisely (e.g., argv for CLI invocation).",
+      "External nodes MUST NOT be assigned any of the standard roles; their role MUST be one of: external_actor, external_input, external_output.",
+      "Generators MUST NOT generate code for external nodes, MUST NOT infer additional dependencies from them, and MUST NOT route business logic through them."
+    ],
+  "external_boundary_rules": [
+    "Executable applications MUST model the existence of a real-world invocation boundary using an external node with id prefix 'external.' (e.g., external.User).",
+    "The external.User node represents boundary existence only and MUST NOT be interpreted as inventing CLI commands, flags, stdin usage, prompts, loops, or interaction mechanics.",
+    "Adding external.User does NOT constitute defining a user interaction model; it only marks the source of execution.",
+    "Interaction mechanics (e.g., argv structure, command names, flags, stdin, REPL loops) MUST NOT be invented unless explicitly required by the story.",
+    "External nodes MUST NOT appear in depends_on of any class.",
+    "External nodes MUST NOT be treated as classes (file_path MUST be null and class_name MUST be null).",
+    "Only the entry_point class may declare interactions targeting external.User.",
+    "Generators MUST NOT generate code, methods, or parameters for external nodes."
+  ],
+  "no_stdlib_name_collision_rule": {
+  "relationship_rules": [
+    "Never use 'logging' as a project package/module/class name. If a logging wrapper exists, it MUST be 'app_logging' and the wrapper class MUST be named 'AppLogger'. All depends_on/import references MUST use 'app_logging.AppLogger' (or the equivalent module path used by the project)."
+  ]
+},
+
 
     "error_severity_rules": {
       "levels": {

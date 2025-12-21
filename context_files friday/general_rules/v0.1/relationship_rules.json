@@ -1,0 +1,46 @@
+{
+  "relationship_rules": {
+"directionality": [
+  "Dependency direction MUST always be caller → callee.",
+  "If Class A calls methods of Class B, then A.depends_on MUST include B.",
+  "The used_by field is derived from depends_on and MUST NOT be independently authored by generators."
+],
+
+
+    "interaction_rules": [
+      "Only the CALLER may declare an interaction.",
+      "A class MUST NOT list an interaction with another class unless it actually invokes its methods.",
+      "An interaction MUST be consistent with depends_on and used_by.",
+      "Do NOT invent reverse interactions."
+    ],
+
+    "domain_model_rules": [
+      "Domain model classes (e.g. Entity) MUST be passive.",
+      "Domain models MUST NOT declare interactions with repositories, services, controllers, or storage.",
+      "Domain models MUST NOT list these components in `depends_on` unless they truly call their methods.",
+      "Domain models MAY appear in other classes' depends_on or interactions, but their own interactions[] MUST normally be empty."
+    ],
+
+"consistency_rules": [
+  "depends_on and interactions MUST describe the same directed call graph (caller → callee).",
+  "used_by MUST be computed from depends_on by tooling (post-processing); generators MAY leave used_by empty or omit it.",
+  "No contradictions between depends_on and interactions are allowed after used_by is derived."
+],
+
+  "example_usage_rules": [
+    "Any example relationship JSON included in context is FORMAT-ONLY.",
+    "Examples must be treated strictly as schema demonstrations.",
+    "Do NOT copy module paths, naming conventions, directory structures, class types, or architectural patterns from example files.",
+    "If an example contains classes such as core.*, todo.*, or any specific dependencies, these must NOT influence generation.",
+    "Examples MUST NOT dictate architecture, dependencies, namespaces, or layering patterns."
+  ],
+  
+  "parameter_ownership_rules": [
+    "If an interaction in relationship.json refers to parameters that cross component boundaries (for example: path, locale, limit, offset, config, environment), the owning component and the parameter flow MUST be modeled explicitly in relationship.json.",
+    "For each such parameter, relationship.json MUST make it clear whether it is: (a) a constructor-injected field on a class, (b) a method parameter on the caller, or (c) a constant/configuration owned by a specific component.",
+    "Generators MUST NOT silently introduce new fields, constructor parameters, or dependencies to carry these parameters if they are not described in relationship.json.",
+    "If relationship.json does not clearly specify ownership of a required parameter (for example, repository methods call storage.read(path) but no class is modeled as owning path), generators MUST treat this as an architectural gap and MAY only surface it via notes/TODOs, not by inventing new structure.",
+    "When repository or service interactions with storage are modeled (for example, read(path), write(path, data)), relationship.json MUST decide whether 'path' is passed at method level (method parameters) or held as state (constructor-injected field) and reflect that choice consistently across classes and interactions."
+  ]
+  }
+}

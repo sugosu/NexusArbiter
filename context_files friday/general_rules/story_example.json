@@ -1,0 +1,19 @@
+{
+  "mode": "strict",
+  "metadata": {
+    "system_name": "example_app",
+    "domain": "example_domain",
+    "source_story_type": "minimal_story",
+    "version": "v1"
+  },
+  "sections": [
+    {
+      "name": "App Story",
+      "content": "An application that manages a collection of records. Each record has an id and associated data. Records can be created, listed, and deleted. Data persists locally as JSON between runs."
+    },
+{
+  "name": "Entry Point",
+  "content": "Run with: python main.py\n\nmain.py wires up dependencies and calls service methods directly to demonstrate core operations (create, list, delete). No command-line arguments. No stdin input. No interactive commands. Results print to stdout."
+}
+  ]
+}

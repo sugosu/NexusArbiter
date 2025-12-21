@@ -4,7 +4,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
-from core.config.run_config import RunConfig, RunItem
+from core.config.run_config import RunConfig, RunItem, IncludeRuns
 from core.logger import BasicLogger
 from core.runtime.app_runner import RunResult
 from core.runtime.run_executor import RunExecutor
@@ -168,38 +168,66 @@ class PipelineRunner:
     # Include runs (v0.1 simplest)
     # ----------------------------------------------------------------------
     def _maybe_inline_run(self, runs: List[Any], index: int, step: Any) -> bool:
-        include_path = None
+        include_paths: List[str] = []
 
-        if hasattr(step, "include_run"):
-            include_path = getattr(step, "include_run")
+        # --- New include type: IncludeRuns(include_runs=[...]) ---
+        if isinstance(step, IncludeRuns):
+            include_paths = list(step.include_runs)
 
-        if not include_path and hasattr(step, "execute_run"):
-            include_path = getattr(step, "execute_run")
+        # --- Backward compat: object has include_run (single) ---
+        if not include_paths and hasattr(step, "include_run"):
+            val = getattr(step, "include_run")
+            if val:
+                include_paths = [str(val)]
 
-        if not include_path and isinstance(step, dict):
-            include_path = step.get("include_run") or step.get("execute_run")
+        # --- Legacy/escape hatch: execute_run (single) ---
+        if not include_paths and hasattr(step, "execute_run"):
+            val = getattr(step, "execute_run")
+            if val:
+                include_paths = [str(val)]
 
-        if not include_path:
+        # --- Dict form support ---
+        if not include_paths and isinstance(step, dict):
+            if step.get("include_runs"):
+                include_paths = [str(x) for x in step.get("include_runs") or []]
+            else:
+                single = step.get("include_run") or step.get("execute_run")
+                if single:
+                    include_paths = [str(single)]
+
+        # Nothing to inline
+        if not include_paths:
             return False
 
-        include_rel = Path(str(include_path))
-        include_abs = (self.project_root / include_rel).resolve()
+        # Validate
+        include_paths = [p.strip() for p in include_paths if isinstance(p, str) and p.strip()]
+        if not include_paths:
+            raise ValueError(f"runs[{index}] include step has no valid paths.")
 
-        if include_abs in self._include_seen:
-            raise ValueError(f"Include cycle detected: {include_abs}")
+        # Inline each referenced runs file in order
+        inlined: List[Any] = []
+        for include_path in include_paths:
+            include_rel = Path(include_path)
+            include_abs = (self.project_root / include_rel).resolve()
 
-        if not include_abs.exists():
-            raise FileNotFoundError(f"Included run file not found: {include_abs}")
+            if include_abs in self._include_seen:
+                raise ValueError(f"Include cycle detected: {include_abs}")
 
-        self._include_seen.add(include_abs)
+            if not include_abs.exists():
+                raise FileNotFoundError(f"Included run file not found: {include_abs}")
 
-        included_cfg = RunConfig.from_file(include_abs)
-        included_runs = list(included_cfg.runs)
+            self._include_seen.add(include_abs)
 
-        self.logger.info("[INCLUDE_RUN] Inlining: %s", str(include_rel).replace("/", "\\"))
+            included_cfg = RunConfig.from_file(include_abs)
+            included_runs = list(included_cfg.runs)
 
-        runs[index : index + 1] = included_runs
+            self.logger.info("[INCLUDE_RUN] Inlining: %s", str(include_rel).replace("/", "\\"))
+            inlined.extend(included_runs)
+
+        # Replace the include step with the inlined runs
+        runs[index : index + 1] = inlined
         return True
+
 
     # ----------------------------------------------------------------------
     # Run execution wrapper
@@ -402,6 +430,13 @@ class PipelineRunner:
         if attempt_cfg.context_files is not None:
             target_run.context_file = attempt_cfg.context_files
             self.logger.info("[RERUN] Context override applied: %s", ", ".join(attempt_cfg.context_files))
+
+
+        # Target File Override
+        if attempt_cfg.target_file:
+            target_run.target_file = attempt_cfg.target_file
+            self.logger.info("[RERUN] Target file override applied: %s", attempt_cfg.target_file)
+
 
         self.logger.info(
             "[RERUN] Applying rerun attempt %s/%s for target '%s' (method=%r block=%r).",

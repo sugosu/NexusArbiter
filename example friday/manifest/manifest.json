@@ -1,0 +1,1219 @@
+{
+  "metadata": {
+    "system_name": "library_manager",
+    "source_type": "derived_manifest",
+    "language": "python",
+    "version": "1.0.0"
+  },
+  "overview": {
+    "purpose": "Manifest derived from relationship.json and attributes.json for library_manager.",
+    "wiring_strategy": "manual_dependency_injection",
+    "notes": "This manifest strictly follows relationship.json as the source of architectural truth where possible. Constructor/method details are taken from attributes.json. Adjustments were applied only to normalize module namespaces to file paths and to explicitly model path ownership and persistence identity policy as required by validation rules. No new architectural components were introduced. Any normalization is recorded in diagnostics where relevant."
+  },
+  "classes": [
+    {
+      "id": "main.Main",
+      "module": "main",
+      "file": "main.py",
+      "class_name": "Main",
+      "role": "entry_point",
+      "depends_on": [
+        "library.app.LibraryApp",
+        "core.printing.ConsolePrinter"
+      ],
+      "imports": [
+        {
+          "module": "library.app",
+          "names": [
+            "LibraryApp"
+          ]
+        },
+        {
+          "module": "core.printing",
+          "names": [
+            "ConsolePrinter"
+          ]
+        }
+      ],
+      "fields": [
+        {
+          "name": "_app",
+          "type": "LibraryApp",
+          "origin": "dependency"
+        },
+        {
+          "name": "_console_printer",
+          "type": "ConsolePrinter",
+          "origin": "dependency"
+        }
+      ],
+      "constructor": {
+        "signature": "__init__(self, app: LibraryApp, console_printer: ConsolePrinter) -> None",
+        "parameters": [
+          {
+            "name": "app",
+            "type": "LibraryApp"
+          },
+          {
+            "name": "console_printer",
+            "type": "ConsolePrinter"
+          }
+        ],
+        "origin": "declared",
+        "body_plan": [
+          "Assign the provided app to self._app",
+          "Assign the provided console_printer to self._console_printer",
+          "No I/O or business logic in constructor"
+        ]
+      },
+      "methods": [
+        {
+          "name": "run",
+          "visibility": "public",
+          "return_type": "None",
+          "parameters": [],
+          "steps": [
+            "Construct a short startup message (string) describing system startup",
+            "Call self._console_printer.print_startup(message) to emit startup summary",
+            "Call self._app.run(books_path, members_path, loans_path) to hand off control to the application orchestrator. NOTE: Main must supply persistent path literals or resolve them from environment/configuration.",
+            "Do not perform domain logic in Main; simply orchestrate calls"
+          ]
+        }
+      ],
+      "notes": [
+        "Entry point class: wires LibraryApp and ConsolePrinter and triggers top-level run.",
+        "Per relationship.json: no domain logic here; only initialization and delegation to LibraryApp.run().",
+        "Important: LibraryApp.run requires explicit path parameters per path-ownership rules. Main is the declared composition root and is responsible for supplying concrete paths at runtime."
+      ]
+    },
+    {
+      "id": "library.app.LibraryApp",
+      "module": "library.app",
+      "file": "library/app.py",
+      "class_name": "LibraryApp",
+      "role": "orchestration",
+      "depends_on": [
+        "library.service.LibraryService",
+        "core.printing.ConsolePrinter"
+      ],
+      "imports": [
+        {
+          "module": "library.service",
+          "names": [
+            "LibraryService"
+          ]
+        },
+        {
+          "module": "core.printing",
+          "names": [
+            "ConsolePrinter"
+          ]
+        },
+        {
+          "module": "typing",
+          "names": [
+            "List",
+            "Dict",
+            "Any"
+          ]
+        }
+      ],
+      "fields": [
+        {
+          "name": "_service",
+          "type": "LibraryService",
+          "origin": "dependency"
+        },
+        {
+          "name": "_console_printer",
+          "type": "ConsolePrinter",
+          "origin": "dependency"
+        }
+      ],
+      "constructor": {
+        "signature": "__init__(self, service: LibraryService, console_printer: ConsolePrinter) -> None",
+        "parameters": [
+          {
+            "name": "service",
+            "type": "LibraryService"
+          },
+          {
+            "name": "console_printer",
+            "type": "ConsolePrinter"
+          }
+        ],
+        "origin": "declared",
+        "body_plan": [
+          "Assign service to self._service",
+          "Assign console_printer to self._console_printer",
+          "No I/O or business logic in constructor"
+        ]
+      },
+      "methods": [
+        {
+          "name": "run",
+          "visibility": "public",
+          "return_type": "None",
+          "parameters": [
+            {
+              "name": "books_path",
+              "type": "str"
+            },
+            {
+              "name": "members_path",
+              "type": "str"
+            },
+            {
+              "name": "loans_path",
+              "type": "str"
+            }
+          ],
+          "steps": [
+            "Request current collections from the domain service by calling:",
+            "  books = self._service.list_books(books_path)",
+            "  members = self._service.list_members(members_path)",
+            "  loans = self._service.list_loans(loans_path)",
+            "Prepare a concise summary structure (e.g., dict with counts and top-level info) from the returned collections",
+            "Call self._console_printer.print_summary(summary) to output the summary",
+            "Notes: This method accepts path parameters explicitly per path-ownership rules; it does not embed path literals. Higher-level code (e.g., Main) must supply concrete paths at runtime."
+          ]
+        }
+      ],
+      "notes": [
+        "Coordinates high-level flows but delegates business rules to LibraryService.",
+        "LibraryApp.run models method-level path ownership by accepting books_path, members_path, and loans_path parameters."
+      ]
+    },
+    {
+      "id": "library.service.LibraryService",
+      "module": "library.service",
+      "file": "library/service.py",
+      "class_name": "LibraryService",
+      "role": "domain_service",
+      "depends_on": [
+        "library.repository.BookRepository",
+        "library.repository.MemberRepository",
+        "library.repository.LoanRepository",
+        "core.printing.ConsolePrinter"
+      ],
+      "imports": [
+        {
+          "module": "library.repository",
+          "names": [
+            "BookRepository",
+            "MemberRepository",
+            "LoanRepository"
+          ]
+        },
+        {
+          "module": "core.printing",
+          "names": [
+            "ConsolePrinter"
+          ]
+        },
+        {
+          "module": "typing",
+          "names": [
+            "List",
+            "Dict",
+            "Any",
+            "Optional"
+          ]
+        }
+      ],
+      "fields": [
+        {
+          "name": "_book_repository",
+          "type": "BookRepository",
+          "origin": "dependency"
+        },
+        {
+          "name": "_member_repository",
+          "type": "MemberRepository",
+          "origin": "dependency"
+        },
+        {
+          "name": "_loan_repository",
+          "type": "LoanRepository",
+          "origin": "dependency"
+        },
+        {
+          "name": "_console_printer",
+          "type": "ConsolePrinter",
+          "origin": "dependency"
+        }
+      ],
+      "constructor": {
+        "signature": "__init__(self, book_repository: BookRepository, member_repository: MemberRepository, loan_repository: LoanRepository, console_printer: ConsolePrinter) -> None",
+        "parameters": [
+          {
+            "name": "book_repository",
+            "type": "BookRepository"
+          },
+          {
+            "name": "member_repository",
+            "type": "MemberRepository"
+          },
+          {
+            "name": "loan_repository",
+            "type": "LoanRepository"
+          },
+          {
+            "name": "console_printer",
+            "type": "ConsolePrinter"
+          }
+        ],
+        "origin": "declared",
+        "body_plan": [
+          "Assign each dependency to its corresponding private field (self._book_repository, etc.)",
+          "Constructor performs no I/O and no business logic"
+        ]
+      },
+      "methods": [
+        {
+          "name": "list_books",
+          "visibility": "public",
+          "return_type": "List[Dict[str, Any]]",
+          "parameters": [
+            {
+              "name": "books_path",
+              "type": "str"
+            }
+          ],
+          "steps": [
+            "Call self._book_repository.load_all(books_path) to obtain persisted book records (list of dict)",
+            "Return the list exactly as provided by repository (service does not mutate data for listing)",
+            "Log a concise info line via self._console_printer.print_info indicating that books were listed"
+          ]
+        },
+        {
+          "name": "list_members",
+          "visibility": "public",
+          "return_type": "List[Dict[str, Any]]",
+          "parameters": [
+            {
+              "name": "members_path",
+              "type": "str"
+            }
+          ],
+          "steps": [
+            "Call self._member_repository.load_all(members_path) to obtain persisted member records",
+            "Return the list as-is",
+            "Use self._console_printer.print_info to emit a concise listing message"
+          ]
+        },
+        {
+          "name": "list_loans",
+          "visibility": "public",
+          "return_type": "List[Dict[str, Any]]",
+          "parameters": [
+            {
+              "name": "loans_path",
+              "type": "str"
+            }
+          ],
+          "steps": [
+            "Call self._loan_repository.load_all(loans_path) to obtain persisted loan records",
+            "Return the list as-is",
+            "Use self._console_printer.print_info to emit a concise listing message"
+          ]
+        },
+        {
+          "name": "loan_book",
+          "visibility": "public",
+          "return_type": "Optional[Dict[str, Any]]",
+          "parameters": [
+            {
+              "name": "member_id",
+              "type": "str"
+            },
+            {
+              "name": "book_id",
+              "type": "str"
+            },
+            {
+              "name": "books_path",
+              "type": "str"
+            },
+            {
+              "name": "members_path",
+              "type": "str"
+            },
+            {
+              "name": "loans_path",
+              "type": "str"
+            }
+          ],
+          "steps": [
+            "Load all books via self._book_repository.load_all(books_path)",
+            "Find the book record with id == book_id; if not found, call self._console_printer.print_warning and return None",
+            "If found, check available copies (assume book record includes a 'copies' int field); if copies <= 0 then call self._console_printer.print_warning and return None",
+            "Load member via self._member_repository.load_all(members_path) and find member with id == member_id; if not found, call self._console_printer.print_warning and return None",
+            "Check member's current loan count (assume member record has 'active_loans' or similar). If member would exceed allowed limit (conservatively assume a limit constant, e.g., 5), then call self._console_printer.print_warning and return None",
+            "If checks pass, construct a loan record dict with minimal fields (id, member_id, book_id, loaned_at) — keep schema generic (dict). Per identity policy, LibraryService generates the loan id (string, UUID4).",
+            "Persist the loan by calling self._loan_repository.save(loan_record, loans_path)",
+            "Decrement book copies and persist via self._book_repository.update(book_id, {'copies': new_copies}, books_path)",
+            "Increment member loan count and persist via self._member_repository.update(member_id, {'active_loans': new_count}, members_path)",
+            "Call self._console_printer.print_info to report successful loan creation",
+            "Return the created loan record (dict)"
+          ]
+        },
+        {
+          "name": "return_book",
+          "visibility": "public",
+          "return_type": "bool",
+          "parameters": [
+            {
+              "name": "loan_id",
+              "type": "str"
+            },
+            {
+              "name": "books_path",
+              "type": "str"
+            },
+            {
+              "name": "members_path",
+              "type": "str"
+            },
+            {
+              "name": "loans_path",
+              "type": "str"
+            }
+          ],
+          "steps": [
+            "Load all loans via self._loan_repository.load_all(loans_path) and find loan with id == loan_id; if not found, call self._console_printer.print_warning and return False",
+            "Load related book and member similarly; if missing, log a warning and return False",
+            "Perform domain updates: increment book copies, decrement member active loan count",
+            "Persist changes: call self._loan_repository.update(loan_id, updated_loan_data, loans_path) or delete depending on chosen loan lifecycle; call self._book_repository.update(book_id, {'copies': updated_copies}, books_path); call self._member_repository.update(member_id, {'active_loans': updated_count}, members_path)",
+            "Call self._console_printer.print_info to report successful return",
+            "Return True on success",
+            "Note: exact loan lifecycle (update vs delete) is unspecified in relationship.json; this implementation documents the conservative steps and uses update/delete as needed."
+          ]
+        }
+      ],
+      "notes": [
+        "Service enforces domain rules (available copies and member loan limits) and orchestrates repository calls that accept explicit path parameters.",
+        "All repository calls must include path arguments (method-level path ownership).",
+        "Decisions: where schema fields (e.g., 'copies', 'active_loans') are referenced, these are conservative assumptions documented here; relationship.json should be extended if precise field names are required."
+      ]
+    },
+    {
+      "id": "library.repository.BookRepository",
+      "module": "library.repository",
+      "file": "library/repository.py",
+      "class_name": "BookRepository",
+      "role": "repository",
+      "depends_on": [
+        "core.storage.JsonStorage",
+        "core.printing.ConsolePrinter"
+      ],
+      "imports": [
+        {
+          "module": "core.storage",
+          "names": [
+            "JsonStorage"
+          ]
+        },
+        {
+          "module": "core.printing",
+          "names": [
+            "ConsolePrinter"
+          ]
+        },
+        {
+          "module": "typing",
+          "names": [
+            "List",
+            "Dict",
+            "Any"
+          ]
+        }
+      ],
+      "fields": [
+        {
+          "name": "_storage",
+          "type": "JsonStorage",
+          "origin": "dependency"
+        },
+        {
+          "name": "_console_printer",
+          "type": "ConsolePrinter",
+          "origin": "dependency"
+        }
+      ],
+      "constructor": {
+        "signature": "__init__(self, storage: JsonStorage, console_printer: ConsolePrinter) -> None",
+        "parameters": [
+          {
+            "name": "storage",
+            "type": "JsonStorage"
+          },
+          {
+            "name": "console_printer",
+            "type": "ConsolePrinter"
+          }
+        ],
+        "origin": "declared",
+        "body_plan": [
+          "Assign storage to self._storage",
+          "Assign console_printer to self._console_printer",
+          "No I/O in constructor"
+        ]
+      },
+      "methods": [
+        {
+          "name": "load_all",
+          "visibility": "public",
+          "return_type": "List[Dict[str, Any]]",
+          "parameters": [
+            {
+              "name": "path",
+              "type": "str"
+            }
+          ],
+          "steps": [
+            "Call self._storage.read(path) to read JSON data; expect a list of records (list[dict])",
+            "If storage returns None or empty, return an empty list",
+            "Emit a debug line via self._console_printer.print_debug describing the read action and path",
+            "Return the loaded list (list[dict])",
+            "Note: repository does not perform domain validation; it maps raw structures to dicts only"
+          ]
+        },
+        {
+          "name": "save",
+          "visibility": "public",
+          "return_type": "Dict[str, Any]",
+          "parameters": [
+            {
+              "name": "book",
+              "type": "Dict[str, Any]"
+            },
+            {
+              "name": "path",
+              "type": "str"
+            }
+          ],
+          "steps": [
+            "Load existing list via self._storage.read(path) or start with empty list",
+            "Append the provided book dict to the list (assume caller provides a unique id field if required per identity policy)",
+            "Call self._storage.write(path, updated_list) to persist changes",
+            "Call self._console_printer.print_debug to emit a debug message about saving",
+            "Return the saved book dict (as persisted)"
+          ]
+        },
+        {
+          "name": "update",
+          "visibility": "public",
+          "return_type": "Optional[Dict[str, Any]]",
+          "parameters": [
+            {
+              "name": "book_id",
+              "type": "str"
+            },
+            {
+              "name": "data",
+              "type": "Dict[str, Any]"
+            },
+            {
+              "name": "path",
+              "type": "str"
+            }
+          ],
+          "steps": [
+            "Load existing list via self._storage.read(path)",
+            "Find record with id == book_id; if not found, call self._console_printer.print_debug and return None",
+            "Update the found record in-place with keys from data",
+            "Persist the full list via self._storage.write(path, updated_list)",
+            "Emit a debug line via self._console_printer.print_debug",
+            "Return the updated record (dict)"
+          ]
+        },
+        {
+          "name": "delete",
+          "visibility": "public",
+          "return_type": "bool",
+          "parameters": [
+            {
+              "name": "book_id",
+              "type": "str"
+            },
+            {
+              "name": "path",
+              "type": "str"
+            }
+          ],
+          "steps": [
+            "Load existing list via self._storage.read(path)",
+            "Remove any record(s) with id == book_id",
+            "Persist the new list via self._storage.write(path, updated_list)",
+            "Emit a debug message via self._console_printer.print_debug",
+            "Return True if a deletion occurred, False otherwise"
+          ]
+        }
+      ],
+      "notes": [
+        "Follows method-level path ownership: public repository methods accept 'path' parameters from the service.",
+        "Repository adapts between JSON-serializable structures and dict-based domain records; it does not enforce business invariants."
+      ]
+    },
+    {
+      "id": "library.repository.MemberRepository",
+      "module": "library.repository",
+      "file": "library/repository.py",
+      "class_name": "MemberRepository",
+      "role": "repository",
+      "depends_on": [
+        "core.storage.JsonStorage",
+        "core.printing.ConsolePrinter"
+      ],
+      "imports": [
+        {
+          "module": "core.storage",
+          "names": [
+            "JsonStorage"
+          ]
+        },
+        {
+          "module": "core.printing",
+          "names": [
+            "ConsolePrinter"
+          ]
+        },
+        {
+          "module": "typing",
+          "names": [
+            "List",
+            "Dict",
+            "Any",
+            "Optional"
+          ]
+        }
+      ],
+      "fields": [
+        {
+          "name": "_storage",
+          "type": "JsonStorage",
+          "origin": "dependency"
+        },
+        {
+          "name": "_console_printer",
+          "type": "ConsolePrinter",
+          "origin": "dependency"
+        }
+      ],
+      "constructor": {
+        "signature": "__init__(self, storage: JsonStorage, console_printer: ConsolePrinter) -> None",
+        "parameters": [
+          {
+            "name": "storage",
+            "type": "JsonStorage"
+          },
+          {
+            "name": "console_printer",
+            "type": "ConsolePrinter"
+          }
+        ],
+        "origin": "declared",
+        "body_plan": [
+          "Assign storage to self._storage",
+          "Assign console_printer to self._console_printer"
+        ]
+      },
+      "methods": [
+        {
+          "name": "load_all",
+          "visibility": "public",
+          "return_type": "List[Dict[str, Any]]",
+          "parameters": [
+            {
+              "name": "path",
+              "type": "str"
+            }
+          ],
+          "steps": [
+            "Call self._storage.read(path) to obtain member records (list of dict)",
+            "If none, return empty list",
+            "Emit debug via self._console_printer.print_debug",
+            "Return the list"
+          ]
+        },
+        {
+          "name": "save",
+          "visibility": "public",
+          "return_type": "Dict[str, Any]",
+          "parameters": [
+            {
+              "name": "member",
+              "type": "Dict[str, Any]"
+            },
+            {
+              "name": "path",
+              "type": "str"
+            }
+          ],
+          "steps": [
+            "Read existing list via self._storage.read(path) or start empty",
+            "Append the provided member dict (caller should provide unique id per identity policy)",
+            "Persist via self._storage.write(path, updated_list)",
+            "Emit debug via self._console_printer.print_debug",
+            "Return the saved member dict"
+          ]
+        },
+        {
+          "name": "update",
+          "visibility": "public",
+          "return_type": "Optional[Dict[str, Any]]",
+          "parameters": [
+            {
+              "name": "member_id",
+              "type": "str"
+            },
+            {
+              "name": "data",
+              "type": "Dict[str, Any]"
+            },
+            {
+              "name": "path",
+              "type": "str"
+            }
+          ],
+          "steps": [
+            "Read list via self._storage.read(path)",
+            "Find record with id == member_id; if missing, emit debug and return None",
+            "Merge fields from data into the record",
+            "Persist updated list via self._storage.write(path, updated_list)",
+            "Emit debug via self._console_printer.print_debug",
+            "Return updated record"
+          ]
+        },
+        {
+          "name": "delete",
+          "visibility": "public",
+          "return_type": "bool",
+          "parameters": [
+            {
+              "name": "member_id",
+              "type": "str"
+            },
+            {
+              "name": "path",
+              "type": "str"
+            }
+          ],
+          "steps": [
+            "Read list via self._storage.read(path)",
+            "Remove records matching member_id",
+            "Persist via self._storage.write(path, updated_list)",
+            "Emit debug via self._console_printer.print_debug",
+            "Return True if any record removed, else False"
+          ]
+        }
+      ],
+      "notes": [
+        "Repository focuses on persistence; domain rules (loan limits) are enforced by LibraryService.",
+        "Path ownership is external: service supplies path strings to these methods."
+      ]
+    },
+    {
+      "id": "library.repository.LoanRepository",
+      "module": "library.repository",
+      "file": "library/repository.py",
+      "class_name": "LoanRepository",
+      "role": "repository",
+      "depends_on": [
+        "core.storage.JsonStorage",
+        "core.printing.ConsolePrinter"
+      ],
+      "imports": [
+        {
+          "module": "core.storage",
+          "names": [
+            "JsonStorage"
+          ]
+        },
+        {
+          "module": "core.printing",
+          "names": [
+            "ConsolePrinter"
+          ]
+        },
+        {
+          "module": "typing",
+          "names": [
+            "List",
+            "Dict",
+            "Any",
+            "Optional"
+          ]
+        }
+      ],
+      "fields": [
+        {
+          "name": "_storage",
+          "type": "JsonStorage",
+          "origin": "dependency"
+        },
+        {
+          "name": "_console_printer",
+          "type": "ConsolePrinter",
+          "origin": "dependency"
+        }
+      ],
+      "constructor": {
+        "signature": "__init__(self, storage: JsonStorage, console_printer: ConsolePrinter) -> None",
+        "parameters": [
+          {
+            "name": "storage",
+            "type": "JsonStorage"
+          },
+          {
+            "name": "console_printer",
+            "type": "ConsolePrinter"
+          }
+        ],
+        "origin": "declared",
+        "body_plan": [
+          "Assign storage to self._storage and console_printer to self._console_printer",
+          "No I/O in constructor"
+        ]
+      },
+      "methods": [
+        {
+          "name": "load_all",
+          "visibility": "public",
+          "return_type": "List[Dict[str, Any]]",
+          "parameters": [
+            {
+              "name": "path",
+              "type": "str"
+            }
+          ],
+          "steps": [
+            "Call self._storage.read(path) to get persisted loans",
+            "If missing, return an empty list",
+            "Emit debug via self._console_printer.print_debug",
+            "Return list of loan dicts"
+          ]
+        },
+        {
+          "name": "save",
+          "visibility": "public",
+          "return_type": "Dict[str, Any]",
+          "parameters": [
+            {
+              "name": "loan",
+              "type": "Dict[str, Any]"
+            },
+            {
+              "name": "path",
+              "type": "str"
+            }
+          ],
+          "steps": [
+            "Read existing loans via self._storage.read(path) or start with empty list",
+            "Append loan dict (LibraryService is responsible for generating loan id per identity policy)",
+            "Persist via self._storage.write(path, updated_list)",
+            "Emit debug via self._console_printer.print_debug",
+            "Return the persisted loan dict"
+          ]
+        },
+        {
+          "name": "update",
+          "visibility": "public",
+          "return_type": "Optional[Dict[str, Any]]",
+          "parameters": [
+            {
+              "name": "loan_id",
+              "type": "str"
+            },
+            {
+              "name": "data",
+              "type": "Dict[str, Any]"
+            },
+            {
+              "name": "path",
+              "type": "str"
+            }
+          ],
+          "steps": [
+            "Read loans via self._storage.read(path)",
+            "Find loan with id == loan_id; if not found, emit debug and return None",
+            "Merge updates from data into the loan record",
+            "Persist updated loans via self._storage.write(path, updated_list)",
+            "Emit debug via self._console_printer.print_debug",
+            "Return updated loan dict"
+          ]
+        }
+      ],
+      "notes": [
+        "Used by LibraryService to persist loan creation and returns.",
+        "Repository methods accept path parameters; repository does not assume any internal path configuration."
+      ]
+    },
+    {
+      "id": "core.storage.JsonStorage",
+      "module": "core.storage",
+      "file": "core/storage.py",
+      "class_name": "JsonStorage",
+      "role": "storage_adapter",
+      "depends_on": [
+        "core.printing.ConsolePrinter"
+      ],
+      "imports": [
+        {
+          "module": "core.printing",
+          "names": [
+            "ConsolePrinter"
+          ]
+        },
+        {
+          "module": "typing",
+          "names": [
+            "Any",
+            "Dict",
+            "List",
+            "Optional"
+          ]
+        }
+      ],
+      "fields": [
+        {
+          "name": "_console_printer",
+          "type": "ConsolePrinter",
+          "origin": "dependency"
+        }
+      ],
+      "constructor": {
+        "signature": "__init__(self, console_printer: ConsolePrinter) -> None",
+        "parameters": [
+          {
+            "name": "console_printer",
+            "type": "ConsolePrinter"
+          }
+        ],
+        "origin": "declared",
+        "body_plan": [
+          "Assign console_printer to self._console_printer",
+          "Do not perform any I/O in constructor"
+        ]
+      },
+      "methods": [
+        {
+          "name": "read",
+          "visibility": "public",
+          "return_type": "Optional[Any]",
+          "parameters": [
+            {
+              "name": "path",
+              "type": "str"
+            }
+          ],
+          "steps": [
+            "Attempt to open the file at 'path' and parse JSON into Python structures (list/dict)",
+            "On success, call self._console_printer.print_debug with a message about successful read and return the parsed structure",
+            "On FileNotFoundError or JSON decode error, call self._console_printer.print_error with an explanatory message and return None",
+            "Note: actual I/O and JSON parsing are implementation details; repository callers must handle None as an empty dataset where appropriate"
+          ]
+        },
+        {
+          "name": "write",
+          "visibility": "public",
+          "return_type": "None",
+          "parameters": [
+            {
+              "name": "path",
+              "type": "str"
+            },
+            {
+              "name": "data",
+              "type": "Any"
+            }
+          ],
+          "steps": [
+            "Attempt to open path for writing and serialize 'data' as JSON",
+            "On success, call self._console_printer.print_debug indicating successful write",
+            "On any I/O error, call self._console_printer.print_error with details",
+            "Do not perform retries or complex error recovery; surface errors via print_error"
+          ]
+        }
+      ],
+      "notes": [
+        "Low-level JSON file adapter; callers supply path explicitly per relationship.json (method-level path ownership).",
+        "Uses ConsolePrinter for debug/error messaging rather than importing stdlib logging."
+      ]
+    },
+    {
+      "id": "core.printing.ConsolePrinter",
+      "module": "core.printing",
+      "file": "core/printing.py",
+      "class_name": "ConsolePrinter",
+      "role": "logging_adapter",
+      "depends_on": [],
+      "imports": [
+        {
+          "module": "logging",
+          "names": []
+        },
+        {
+          "module": "typing",
+          "names": [
+            "Any",
+            "Dict"
+          ]
+        }
+      ],
+      "fields": [],
+      "constructor": {
+        "signature": "__init__(self) -> None",
+        "parameters": [],
+        "origin": "declared",
+        "body_plan": [
+          "Perform trivial logger setup if desired (e.g., configure logging.basicConfig) — conservative implementations may leave configuration to application bootstrap",
+          "Do not depend on other project components"
+        ]
+      },
+      "methods": [
+        {
+          "name": "print_startup",
+          "visibility": "public",
+          "return_type": "None",
+          "parameters": [
+            {
+              "name": "message",
+              "type": "str"
+            }
+          ],
+          "steps": [
+            "Emit a concise startup message to stdout or via logging.info",
+            "This method is referenced by Main per relationship.json and must exist"
+          ]
+        },
+        {
+          "name": "print_summary",
+          "visibility": "public",
+          "return_type": "None",
+          "parameters": [
+            {
+              "name": "summary",
+              "type": "Any"
+            }
+          ],
+          "steps": [
+            "Render the provided summary (generic structure) to a concise textual form and emit to stdout or via logging.info",
+            "Keep formatting simple and stable so tests can assert on output if needed"
+          ]
+        },
+        {
+          "name": "print_info",
+          "visibility": "public",
+          "return_type": "None",
+          "parameters": [
+            {
+              "name": "message",
+              "type": "str"
+            }
+          ],
+          "steps": [
+            "Emit the message via logging.info or print to stdout",
+            "Designed for concise operational messages requested by services"
+          ]
+        },
+        {
+          "name": "print_debug",
+          "visibility": "public",
+          "return_type": "None",
+          "parameters": [
+            {
+              "name": "message",
+              "type": "str"
+            }
+          ],
+          "steps": [
+            "Emit low-level debug messages via logging.debug",
+            "Used by repositories and storage adapter for traceability"
+          ]
+        },
+        {
+          "name": "print_warning",
+          "visibility": "public",
+          "return_type": "None",
+          "parameters": [
+            {
+              "name": "message",
+              "type": "str"
+            }
+          ],
+          "steps": [
+            "Emit a warning message via logging.warning or print to stdout",
+            "Used by services to notify about rule violations or prevented operations"
+          ]
+        },
+        {
+          "name": "print_error",
+          "visibility": "public",
+          "return_type": "None",
+          "parameters": [
+            {
+              "name": "message",
+              "type": "str"
+            }
+          ],
+          "steps": [
+            "Emit an error message via logging.error",
+            "Used by storage adapter for I/O problem reporting"
+          ]
+        }
+      ],
+      "notes": [
+        "Logging adapter: allowed to import stdlib logging per attribution rules.",
+        "Provides concise printing APIs used by application and services.",
+        "Module namespace has been normalized to align with file path (core/printing.py). The original relationship/attributes referenced core.logging; manifest normalized the declared id and imports to core.printing to satisfy module namespace consistency rules. This normalization is recorded in diagnostics."
+      ]
+    }
+  ],
+  "initialization_graph": {
+    "derived": true,
+    "composition_roots": [
+      "main.Main"
+    ],
+    "instantiation_order": [
+      "core.printing.ConsolePrinter",
+      "core.storage.JsonStorage",
+      "library.repository.BookRepository",
+      "library.repository.MemberRepository",
+      "library.repository.LoanRepository",
+      "library.service.LibraryService",
+      "library.app.LibraryApp",
+      "main.Main"
+    ],
+    "nodes": [
+      {
+        "id": "core.printing.ConsolePrinter",
+        "module": "core.printing",
+        "class": "ConsolePrinter",
+        "lifecycle": "singleton",
+        "construct": { "type": "constructor", "params": [] },
+        "origin": "relationship"
+      },
+      {
+        "id": "core.storage.JsonStorage",
+        "module": "core.storage",
+        "class": "JsonStorage",
+        "lifecycle": "singleton",
+        "construct": { "type": "constructor", "params": [ { "name": "console_printer", "source_type": "component", "source": "core.printing.ConsolePrinter" } ] },
+        "origin": "relationship"
+      },
+      {
+        "id": "library.repository.BookRepository",
+        "module": "library.repository",
+        "class": "BookRepository",
+        "lifecycle": "singleton",
+        "construct": { "type": "constructor", "params": [ { "name": "storage", "source_type": "component", "source": "core.storage.JsonStorage" }, { "name": "console_printer", "source_type": "component", "source": "core.printing.ConsolePrinter" } ] },
+        "origin": "relationship"
+      },
+      {
+        "id": "library.repository.MemberRepository",
+        "module": "library.repository",
+        "class": "MemberRepository",
+        "lifecycle": "singleton",
+        "construct": { "type": "constructor", "params": [ { "name": "storage", "source_type": "component", "source": "core.storage.JsonStorage" }, { "name": "console_printer", "source_type": "component", "source": "core.printing.ConsolePrinter" } ] },
+        "origin": "relationship"
+      },
+      {
+        "id": "library.repository.LoanRepository",
+        "module": "library.repository",
+        "class": "LoanRepository",
+        "lifecycle": "singleton",
+        "construct": { "type": "constructor", "params": [ { "name": "storage", "source_type": "component", "source": "core.storage.JsonStorage" }, { "name": "console_printer", "source_type": "component", "source": "core.printing.ConsolePrinter" } ] },
+        "origin": "relationship"
+      },
+      {
+        "id": "library.service.LibraryService",
+        "module": "library.service",
+        "class": "LibraryService",
+        "lifecycle": "singleton",
+        "construct": { "type": "constructor", "params": [ { "name": "book_repository", "source_type": "component", "source": "library.repository.BookRepository" }, { "name": "member_repository", "source_type": "component", "source": "library.repository.MemberRepository" }, { "name": "loan_repository", "source_type": "component", "source": "library.repository.LoanRepository" }, { "name": "console_printer", "source_type": "component", "source": "core.printing.ConsolePrinter" } ] },
+        "origin": "relationship"
+      },
+      {
+        "id": "library.app.LibraryApp",
+        "module": "library.app",
+        "class": "LibraryApp",
+        "lifecycle": "singleton",
+        "construct": { "type": "constructor", "params": [ { "name": "service", "source_type": "component", "source": "library.service.LibraryService" }, { "name": "console_printer", "source_type": "component", "source": "core.printing.ConsolePrinter" } ] },
+        "origin": "relationship"
+      },
+      {
+        "id": "main.Main",
+        "module": "main",
+        "class": "Main",
+        "lifecycle": "singleton",
+        "construct": { "type": "constructor", "params": [ { "name": "app", "source_type": "component", "source": "library.app.LibraryApp" }, { "name": "console_printer", "source_type": "component", "source": "core.printing.ConsolePrinter" } ] },
+        "origin": "relationship"
+      }
+    ]
+  },
+  "runtime": {
+    "entrypoint": {
+      "file": "main.py",
+      "call": "Main.run"
+    }
+  },
+  "persistence": {
+    "identity_policy": {
+      "summary": "Explicit identity policy for persisted records required by local_persistence_rules.",
+      "policies": [
+        {
+          "entity": "Book",
+          "identifier": {
+            "created_by": "caller (typically LibraryService or external data import process)",
+            "type": "string",
+            "format": "uuid4 (recommended)",
+            "immutability": "immutable once assigned"
+          },
+          "notes": "BookRepository.save assumes caller provides unique id; manifest documents that responsibility here. Repositories will not synthesize or mutate book ids."
+        },
+        {
+          "entity": "Member",
+          "identifier": {
+            "created_by": "caller (typically LibraryService or external registration process)",
+            "type": "string",
+            "format": "uuid4 (recommended)",
+            "immutability": "immutable once assigned"
+          },
+          "notes": "MemberRepository.save assumes caller provides unique id; manifest documents that responsibility here."
+        },
+        {
+          "entity": "Loan",
+          "identifier": {
+            "created_by": "LibraryService (domain service)",
+            "type": "string",
+            "format": "uuid4 (recommended)",
+            "immutability": "immutable once assigned"
+          },
+          "notes": "LibraryService is responsible for loan id generation when creating loan records via loan_book(). Repositories persist the provided loan id without modification."
+        }
+      ]
+    }
+  },
+  "diagnostics": [
+    {
+      "code": "module_namespace_normalized",
+      "severity": "minor",
+      "message": "Class namespace for the console printing adapter was normalized to match its file path (core/printing.py). Relationship/attributes originally referenced core.logging; manifest declares core.printing.ConsolePrinter to satisfy module_namespace_consistency_rule. Upstream relationship.json may be updated to eliminate the original mismatch.",
+      "related": ["core.printing.ConsolePrinter"]
+    },
+    {
+      "code": "path_parameters_modeled",
+      "severity": "minor",
+      "message": "LibraryApp.run was updated to accept explicit books_path, members_path, and loans_path parameters to comply with path_ownership_rules. Main (composition root) must supply concrete paths at runtime or via configuration.",
+      "related": ["library.app.LibraryApp.run"]
+    },
+    {
+      "code": "identity_policy_added",
+      "severity": "major",
+      "message": "An explicit persistence identity policy was added to satisfy local_persistence_rules.identity_policy_required. It documents which layer creates identifiers, their type/format, and immutability. Review with stakeholders if alternative identifier ownership is desired.",
+      "related": ["persistence.identity_policy"]
+    }
+  ]
+}

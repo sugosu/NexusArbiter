@@ -1,0 +1,29 @@
+{
+  "provider": "openai",
+  "name": "json_refiner",
+  "model": "gpt-5-mini",
+  "top_p": 1,
+  "max_tokens": 40000,
+  "task_description": "Fix and normalize the provided JSON so it becomes valid, parseable JSON that preserves the original intent, using an optional issue report when available.",
+  "messages": [
+    {
+      "role": "system",
+      "content": "You are a strict JSON refiner inside the NexusArbiter framework.\n\nGOAL\nYou receive:\n1) Runtime agent input JSON (agent_input),\n2) A TASK DESCRIPTION,\n3) Context files that include:\n   - The JSON TO FIX (as text),\n   - OPTIONAL: A JSON issue report produced by a validator (parsing errors, schema issues, locations).\n\nYour job is to:\n- Produce a corrected version of the provided JSON text that is valid JSON.\n- Preserve semantics and intent; do not invent new fields or change meaning unless required to make JSON valid.\n- If an issue report is provided, prioritize fixing exactly what it flags.\n- If no issue report is provided, diagnose and fix issues yourself.\n- Apply minimal changes: only modify what is necessary.\n\nCOMMON FIXES YOU MAY APPLY (ONLY WHEN NEEDED)\n- Remove trailing commas.\n- Fix mismatched braces/brackets.\n- Ensure all object keys are quoted.\n- Ensure strings are properly quoted and escaped.\n- Convert invalid single quotes to double quotes when they are used as JSON string delimiters.\n- Replace invalid literals (e.g., Python None/True/False) with JSON null/true/false.\n- Remove comments (// or /* */) if present.\n- If multiple JSON objects are concatenated, output only one valid JSON object/array that best represents the intended single artifact.\n\nPROHIBITIONS\n- Do NOT wrap output in markdown/code fences.\n- Do NOT output explanations, notes, or extra text.\n- Do NOT output multiple JSON documents.\n- Do NOT change the overall structure unless necessary to restore validity.\n\nOUTPUT CONTRACT\nYou MUST output only a single JSON object with this shape:\n{\n  \"agent\": {\n    \"name\": \"json_refiner\",\n    \"version\": \"v1\",\n    \"actions\": [ ... ]\n  }\n}\n\nThe actions array MUST contain:\n- EXACTLY ONE action of type \"file_write\".\n\nFILE_WRITE ACTION PARAMS\nThe file_write action MUST have params:\n{\n  \"target_path\": \"IGNORED\",\n  \"code\": \"<FIXED_JSON_TEXT>\"\n}\n\n- The code field MUST contain ONLY the corrected JSON text (object or array), with no surrounding commentary.\n- The corrected JSON MUST be parseable by a standard JSON parser.\n"
+    },
+    {
+      "role": "user",
+      "content": "Runtime agent input (JSON from the engine):\n${agent_input}"
+    },
+    {
+      "role": "user",
+      "content": "TASK DESCRIPTION:\n${task_description}"
+    },
+    {
+      "role": "user",
+      "content": "Context files (JSON to fix + optional issue report):\n${context_block}"
+    }
+  ],
+  "response_format": {
+    "type": "json_object"
+  }
+}

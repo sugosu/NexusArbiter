@@ -1,0 +1,1011 @@
+{
+  "mode": "strict",
+  "metadata": {
+    "system_name": "library_manager",
+    "source_type": "relationship_attribution",
+    "language": "python",
+    "version": "1.0.0"
+  },
+  "classes": [
+    {
+      "id": "main.Main",
+      "file_path": "main.py",
+      "class_name": "Main",
+      "role": "entry_point",
+      "imports": [
+        {
+          "module": "library.app",
+          "names": [
+            "LibraryApp"
+          ]
+        },
+        {
+          "module": "core.logging",
+          "names": [
+            "ConsolePrinter"
+          ]
+        }
+      ],
+      "fields": [
+        {
+          "name": "_app",
+          "type": "LibraryApp",
+          "origin": "dependency"
+        },
+        {
+          "name": "_console_printer",
+          "type": "ConsolePrinter",
+          "origin": "dependency"
+        }
+      ],
+      "constructor": {
+        "signature": "__init__(self, app: LibraryApp, console_printer: ConsolePrinter) -> None",
+        "parameters": [
+          {
+            "name": "app",
+            "type": "LibraryApp"
+          },
+          {
+            "name": "console_printer",
+            "type": "ConsolePrinter"
+          }
+        ],
+        "body_plan": [
+          "Assign the provided app to self._app",
+          "Assign the provided console_printer to self._console_printer",
+          "No I/O or business logic in constructor"
+        ]
+      },
+      "methods": [
+        {
+          "name": "run",
+          "visibility": "public",
+          "return_type": "None",
+          "parameters": [],
+          "steps": [
+            "Construct a short startup message (string) describing system startup",
+            "Call self._console_printer.print_startup(message) to emit startup summary",
+            "Call self._app.run() to hand off control to the application orchestrator",
+            "Do not perform domain logic in Main; simply orchestrate calls"
+          ]
+        }
+      ],
+      "notes": [
+        "Entry point class: wires LibraryApp and ConsolePrinter and triggers top-level run.",
+        "Per relationship.json: no domain logic here; only initialization and delegation to LibraryApp.run()."
+      ]
+    },
+    {
+      "id": "library.app.LibraryApp",
+      "file_path": "library/app.py",
+      "class_name": "LibraryApp",
+      "role": "orchestration",
+      "imports": [
+        {
+          "module": "library.service",
+          "names": [
+            "LibraryService"
+          ]
+        },
+        {
+          "module": "core.logging",
+          "names": [
+            "ConsolePrinter"
+          ]
+        },
+        {
+          "module": "typing",
+          "names": [
+            "List",
+            "Dict",
+            "Any"
+          ]
+        }
+      ],
+      "fields": [
+        {
+          "name": "_service",
+          "type": "LibraryService",
+          "origin": "dependency"
+        },
+        {
+          "name": "_console_printer",
+          "type": "ConsolePrinter",
+          "origin": "dependency"
+        }
+      ],
+      "constructor": {
+        "signature": "__init__(self, service: LibraryService, console_printer: ConsolePrinter) -> None",
+        "parameters": [
+          {
+            "name": "service",
+            "type": "LibraryService"
+          },
+          {
+            "name": "console_printer",
+            "type": "ConsolePrinter"
+          }
+        ],
+        "body_plan": [
+          "Assign service to self._service",
+          "Assign console_printer to self._console_printer",
+          "No I/O or business logic in constructor"
+        ]
+      },
+      "methods": [
+        {
+          "name": "run",
+          "visibility": "public",
+          "return_type": "None",
+          "parameters": [],
+          "steps": [
+            "Request current collections from the domain service by calling:",
+            "  books = self._service.list_books(books_path) -- NOTE: library/service methods expect path parameters; caller must supply paths.",
+            "  members = self._service.list_members(members_path)",
+            "  loans = self._service.list_loans(loans_path)",
+            "Because relationship.json does not specify concrete path values, this orchestration method must be called by higher-level code that supplies paths or the application must be extended in relationship.json to provide path ownership.",
+            "Prepare a concise summary structure (e.g., dict with counts and top-level info) from the returned collections",
+            "Call self._console_printer.print_summary(summary) to output the summary",
+            "Notes: This method intentionally avoids embedding path literals; it forwards to the service which performs path-based repository calls per the architecture."
+          ]
+        }
+      ],
+      "notes": [
+        "Coordinates high-level flows but delegates business rules to LibraryService.",
+        "Because repository/storage path ownership is method-level per relationship.json, LibraryApp.run must either receive paths or be invoked by code that provides them. Relationship.json does not fix who supplies path literals; leave resolution to system configuration updates in relationship.json."
+      ]
+    },
+    {
+      "id": "library.service.LibraryService",
+      "file_path": "library/service.py",
+      "class_name": "LibraryService",
+      "role": "domain_service",
+      "imports": [
+        {
+          "module": "library.repository",
+          "names": [
+            "BookRepository",
+            "MemberRepository",
+            "LoanRepository"
+          ]
+        },
+        {
+          "module": "core.logging",
+          "names": [
+            "ConsolePrinter"
+          ]
+        },
+        {
+          "module": "typing",
+          "names": [
+            "List",
+            "Dict",
+            "Any",
+            "Optional"
+          ]
+        }
+      ],
+      "fields": [
+        {
+          "name": "_book_repository",
+          "type": "BookRepository",
+          "origin": "dependency"
+        },
+        {
+          "name": "_member_repository",
+          "type": "MemberRepository",
+          "origin": "dependency"
+        },
+        {
+          "name": "_loan_repository",
+          "type": "LoanRepository",
+          "origin": "dependency"
+        },
+        {
+          "name": "_console_printer",
+          "type": "ConsolePrinter",
+          "origin": "dependency"
+        }
+      ],
+      "constructor": {
+        "signature": "__init__(self, book_repository: BookRepository, member_repository: MemberRepository, loan_repository: LoanRepository, console_printer: ConsolePrinter) -> None",
+        "parameters": [
+          {
+            "name": "book_repository",
+            "type": "BookRepository"
+          },
+          {
+            "name": "member_repository",
+            "type": "MemberRepository"
+          },
+          {
+            "name": "loan_repository",
+            "type": "LoanRepository"
+          },
+          {
+            "name": "console_printer",
+            "type": "ConsolePrinter"
+          }
+        ],
+        "body_plan": [
+          "Assign each dependency to its corresponding private field (self._book_repository, etc.)",
+          "Constructor performs no I/O and no business logic"
+        ]
+      },
+      "methods": [
+        {
+          "name": "list_books",
+          "visibility": "public",
+          "return_type": "List[Dict[str, Any]]",
+          "parameters": [
+            {
+              "name": "books_path",
+              "type": "str"
+            }
+          ],
+          "steps": [
+            "Call self._book_repository.load_all(books_path) to obtain persisted book records (list of dict)",
+            "Return the list exactly as provided by repository (service does not mutate data for listing)",
+            "Log a concise info line via self._console_printer.print_info indicating that books were listed"
+          ]
+        },
+        {
+          "name": "list_members",
+          "visibility": "public",
+          "return_type": "List[Dict[str, Any]]",
+          "parameters": [
+            {
+              "name": "members_path",
+              "type": "str"
+            }
+          ],
+          "steps": [
+            "Call self._member_repository.load_all(members_path) to obtain persisted member records",
+            "Return the list as-is",
+            "Use self._console_printer.print_info to emit a concise listing message"
+          ]
+        },
+        {
+          "name": "list_loans",
+          "visibility": "public",
+          "return_type": "List[Dict[str, Any]]",
+          "parameters": [
+            {
+              "name": "loans_path",
+              "type": "str"
+            }
+          ],
+          "steps": [
+            "Call self._loan_repository.load_all(loans_path) to obtain persisted loan records",
+            "Return the list as-is",
+            "Use self._console_printer.print_info to emit a concise listing message"
+          ]
+        },
+        {
+          "name": "loan_book",
+          "visibility": "public",
+          "return_type": "Optional[Dict[str, Any]]",
+          "parameters": [
+            {
+              "name": "member_id",
+              "type": "str"
+            },
+            {
+              "name": "book_id",
+              "type": "str"
+            },
+            {
+              "name": "books_path",
+              "type": "str"
+            },
+            {
+              "name": "members_path",
+              "type": "str"
+            },
+            {
+              "name": "loans_path",
+              "type": "str"
+            }
+          ],
+          "steps": [
+            "Load all books via self._book_repository.load_all(books_path)",
+            "Find the book record with id == book_id; if not found, call self._console_printer.print_warning and return None",
+            "If found, check available copies (assume book record includes a 'copies' int field); if copies <= 0 then call self._console_printer.print_warning and return None",
+            "Load member via self._member_repository.load_all(members_path) and find member with id == member_id; if not found, call self._console_printer.print_warning and return None",
+            "Check member's current loan count (assume member record has 'active_loans' or similar). If member would exceed allowed limit (conservatively assume a limit constant, e.g., 5), then call self._console_printer.print_warning and return None",
+            "If checks pass, construct a loan record dict with minimal fields (id, member_id, book_id, loaned_at) — keep schema generic (dict)",
+            "Persist the loan by calling self._loan_repository.save(loan_record, loans_path)",
+            "Decrement book copies and persist via self._book_repository.update(book_id, {'copies': new_copies}, books_path)",
+            "Increment member loan count and persist via self._member_repository.update(member_id, {'active_loans': new_count}, members_path)",
+            "Call self._console_printer.print_info to report successful loan creation",
+            "Return the created loan record (dict)"
+          ]
+        },
+        {
+          "name": "return_book",
+          "visibility": "public",
+          "return_type": "bool",
+          "parameters": [
+            {
+              "name": "loan_id",
+              "type": "str"
+            },
+            {
+              "name": "books_path",
+              "type": "str"
+            },
+            {
+              "name": "members_path",
+              "type": "str"
+            },
+            {
+              "name": "loans_path",
+              "type": "str"
+            }
+          ],
+          "steps": [
+            "Load all loans via self._loan_repository.load_all(loans_path) and find loan with id == loan_id; if not found, call self._console_printer.print_warning and return False",
+            "Load related book and member similarly; if missing, log a warning and return False",
+            "Perform domain updates: increment book copies, decrement member active loan count",
+            "Persist changes: call self._loan_repository.update(loan_id, updated_loan_data, loans_path) or delete depending on chosen loan lifecycle; call self._book_repository.update(book_id, {'copies': updated_copies}, books_path); call self._member_repository.update(member_id, {'active_loans': updated_count}, members_path)",
+            "Call self._console_printer.print_info to report successful return",
+            "Return True on success",
+            "Note: exact loan lifecycle (update vs delete) is unspecified in relationship.json; this implementation documents the conservative steps and uses update/delete as needed."
+          ]
+        }
+      ],
+      "notes": [
+        "Service enforces domain rules (available copies and member loan limits) and orchestrates repository calls that accept explicit path parameters.",
+        "All repository calls must include path arguments (method-level path ownership).",
+        "Decisions: where schema fields (e.g., 'copies', 'active_loans') are referenced, these are conservative assumptions documented here; relationship.json should be extended if precise field names are required."
+      ]
+    },
+    {
+      "id": "library.repository.BookRepository",
+      "file_path": "library/repository.py",
+      "class_name": "BookRepository",
+      "role": "repository",
+      "imports": [
+        {
+          "module": "core.storage",
+          "names": [
+            "JsonStorage"
+          ]
+        },
+        {
+          "module": "core.logging",
+          "names": [
+            "ConsolePrinter"
+          ]
+        },
+        {
+          "module": "typing",
+          "names": [
+            "List",
+            "Dict",
+            "Any"
+          ]
+        }
+      ],
+      "fields": [
+        {
+          "name": "_storage",
+          "type": "JsonStorage",
+          "origin": "dependency"
+        },
+        {
+          "name": "_console_printer",
+          "type": "ConsolePrinter",
+          "origin": "dependency"
+        }
+      ],
+      "constructor": {
+        "signature": "__init__(self, storage: JsonStorage, console_printer: ConsolePrinter) -> None",
+        "parameters": [
+          {
+            "name": "storage",
+            "type": "JsonStorage"
+          },
+          {
+            "name": "console_printer",
+            "type": "ConsolePrinter"
+          }
+        ],
+        "body_plan": [
+          "Assign storage to self._storage",
+          "Assign console_printer to self._console_printer",
+          "No I/O in constructor"
+        ]
+      },
+      "methods": [
+        {
+          "name": "load_all",
+          "visibility": "public",
+          "return_type": "List[Dict[str, Any]]",
+          "parameters": [
+            {
+              "name": "path",
+              "type": "str"
+            }
+          ],
+          "steps": [
+            "Call self._storage.read(path) to read JSON data; expect a list of records (list[dict])",
+            "If storage returns None or empty, return an empty list",
+            "Emit a debug line via self._console_printer.print_debug describing the read action and path",
+            "Return the loaded list (list[dict])",
+            "Note: repository does not perform domain validation; it maps raw structures to dicts only"
+          ]
+        },
+        {
+          "name": "save",
+          "visibility": "public",
+          "return_type": "Dict[str, Any]",
+          "parameters": [
+            {
+              "name": "book",
+              "type": "Dict[str, Any]"
+            },
+            {
+              "name": "path",
+              "type": "str"
+            }
+          ],
+          "steps": [
+            "Load existing list via self._storage.read(path) or start with empty list",
+            "Append the provided book dict to the list (assume caller provides a unique id field if required)",
+            "Call self._storage.write(path, updated_list) to persist changes",
+            "Call self._console_printer.print_debug to emit a debug message about saving",
+            "Return the saved book dict (as persisted)"
+          ]
+        },
+        {
+          "name": "update",
+          "visibility": "public",
+          "return_type": "Optional[Dict[str, Any]]",
+          "parameters": [
+            {
+              "name": "book_id",
+              "type": "str"
+            },
+            {
+              "name": "data",
+              "type": "Dict[str, Any]"
+            },
+            {
+              "name": "path",
+              "type": "str"
+            }
+          ],
+          "steps": [
+            "Load existing list via self._storage.read(path)",
+            "Find record with id == book_id; if not found, call self._console_printer.print_debug and return None",
+            "Update the found record in-place with keys from data",
+            "Persist the full list via self._storage.write(path, updated_list)",
+            "Emit a debug line via self._console_printer.print_debug",
+            "Return the updated record (dict)"
+          ]
+        },
+        {
+          "name": "delete",
+          "visibility": "public",
+          "return_type": "bool",
+          "parameters": [
+            {
+              "name": "book_id",
+              "type": "str"
+            },
+            {
+              "name": "path",
+              "type": "str"
+            }
+          ],
+          "steps": [
+            "Load existing list via self._storage.read(path)",
+            "Remove any record(s) with id == book_id",
+            "Persist the new list via self._storage.write(path, updated_list)",
+            "Emit a debug message via self._console_printer.print_debug",
+            "Return True if a deletion occurred, False otherwise"
+          ]
+        }
+      ],
+      "notes": [
+        "Follows method-level path ownership: public repository methods accept 'path' parameters from the service.",
+        "Repository adapts between JSON-serializable structures and dict-based domain records; it does not enforce business invariants."
+      ]
+    },
+    {
+      "id": "library.repository.MemberRepository",
+      "file_path": "library/repository.py",
+      "class_name": "MemberRepository",
+      "role": "repository",
+      "imports": [
+        {
+          "module": "core.storage",
+          "names": [
+            "JsonStorage"
+          ]
+        },
+        {
+          "module": "core.logging",
+          "names": [
+            "ConsolePrinter"
+          ]
+        },
+        {
+          "module": "typing",
+          "names": [
+            "List",
+            "Dict",
+            "Any",
+            "Optional"
+          ]
+        }
+      ],
+      "fields": [
+        {
+          "name": "_storage",
+          "type": "JsonStorage",
+          "origin": "dependency"
+        },
+        {
+          "name": "_console_printer",
+          "type": "ConsolePrinter",
+          "origin": "dependency"
+        }
+      ],
+      "constructor": {
+        "signature": "__init__(self, storage: JsonStorage, console_printer: ConsolePrinter) -> None",
+        "parameters": [
+          {
+            "name": "storage",
+            "type": "JsonStorage"
+          },
+          {
+            "name": "console_printer",
+            "type": "ConsolePrinter"
+          }
+        ],
+        "body_plan": [
+          "Assign storage to self._storage",
+          "Assign console_printer to self._console_printer"
+        ]
+      },
+      "methods": [
+        {
+          "name": "load_all",
+          "visibility": "public",
+          "return_type": "List[Dict[str, Any]]",
+          "parameters": [
+            {
+              "name": "path",
+              "type": "str"
+            }
+          ],
+          "steps": [
+            "Call self._storage.read(path) to obtain member records (list of dict)",
+            "If none, return empty list",
+            "Emit debug via self._console_printer.print_debug",
+            "Return the list"
+          ]
+        },
+        {
+          "name": "save",
+          "visibility": "public",
+          "return_type": "Dict[str, Any]",
+          "parameters": [
+            {
+              "name": "member",
+              "type": "Dict[str, Any]"
+            },
+            {
+              "name": "path",
+              "type": "str"
+            }
+          ],
+          "steps": [
+            "Read existing list via self._storage.read(path) or start empty",
+            "Append the provided member dict",
+            "Persist via self._storage.write(path, updated_list)",
+            "Emit debug via self._console_printer.print_debug",
+            "Return the saved member dict"
+          ]
+        },
+        {
+          "name": "update",
+          "visibility": "public",
+          "return_type": "Optional[Dict[str, Any]]",
+          "parameters": [
+            {
+              "name": "member_id",
+              "type": "str"
+            },
+            {
+              "name": "data",
+              "type": "Dict[str, Any]"
+            },
+            {
+              "name": "path",
+              "type": "str"
+            }
+          ],
+          "steps": [
+            "Read list via self._storage.read(path)",
+            "Find record with id == member_id; if missing, emit debug and return None",
+            "Merge fields from data into the record",
+            "Persist updated list via self._storage.write(path, updated_list)",
+            "Emit debug via self._console_printer.print_debug",
+            "Return updated record"
+          ]
+        },
+        {
+          "name": "delete",
+          "visibility": "public",
+          "return_type": "bool",
+          "parameters": [
+            {
+              "name": "member_id",
+              "type": "str"
+            },
+            {
+              "name": "path",
+              "type": "str"
+            }
+          ],
+          "steps": [
+            "Read list via self._storage.read(path)",
+            "Remove records matching member_id",
+            "Persist via self._storage.write(path, updated_list)",
+            "Emit debug via self._console_printer.print_debug",
+            "Return True if any record removed, else False"
+          ]
+        }
+      ],
+      "notes": [
+        "Repository focuses on persistence; domain rules (loan limits) are enforced by LibraryService.",
+        "Path ownership is external: service supplies path strings to these methods."
+      ]
+    },
+    {
+      "id": "library.repository.LoanRepository",
+      "file_path": "library/repository.py",
+      "class_name": "LoanRepository",
+      "role": "repository",
+      "imports": [
+        {
+          "module": "core.storage",
+          "names": [
+            "JsonStorage"
+          ]
+        },
+        {
+          "module": "core.logging",
+          "names": [
+            "ConsolePrinter"
+          ]
+        },
+        {
+          "module": "typing",
+          "names": [
+            "List",
+            "Dict",
+            "Any",
+            "Optional"
+          ]
+        }
+      ],
+      "fields": [
+        {
+          "name": "_storage",
+          "type": "JsonStorage",
+          "origin": "dependency"
+        },
+        {
+          "name": "_console_printer",
+          "type": "ConsolePrinter",
+          "origin": "dependency"
+        }
+      ],
+      "constructor": {
+        "signature": "__init__(self, storage: JsonStorage, console_printer: ConsolePrinter) -> None",
+        "parameters": [
+          {
+            "name": "storage",
+            "type": "JsonStorage"
+          },
+          {
+            "name": "console_printer",
+            "type": "ConsolePrinter"
+          }
+        ],
+        "body_plan": [
+          "Assign storage to self._storage and console_printer to self._console_printer",
+          "No I/O in constructor"
+        ]
+      },
+      "methods": [
+        {
+          "name": "load_all",
+          "visibility": "public",
+          "return_type": "List[Dict[str, Any]]",
+          "parameters": [
+            {
+              "name": "path",
+              "type": "str"
+            }
+          ],
+          "steps": [
+            "Call self._storage.read(path) to get persisted loans",
+            "If missing, return an empty list",
+            "Emit debug via self._console_printer.print_debug",
+            "Return list of loan dicts"
+          ]
+        },
+        {
+          "name": "save",
+          "visibility": "public",
+          "return_type": "Dict[str, Any]",
+          "parameters": [
+            {
+              "name": "loan",
+              "type": "Dict[str, Any]"
+            },
+            {
+              "name": "path",
+              "type": "str"
+            }
+          ],
+          "steps": [
+            "Read existing loans via self._storage.read(path) or start with empty list",
+            "Append loan dict",
+            "Persist via self._storage.write(path, updated_list)",
+            "Emit debug via self._console_printer.print_debug",
+            "Return the persisted loan dict"
+          ]
+        },
+        {
+          "name": "update",
+          "visibility": "public",
+          "return_type": "Optional[Dict[str, Any]]",
+          "parameters": [
+            {
+              "name": "loan_id",
+              "type": "str"
+            },
+            {
+              "name": "data",
+              "type": "Dict[str, Any]"
+            },
+            {
+              "name": "path",
+              "type": "str"
+            }
+          ],
+          "steps": [
+            "Read loans via self._storage.read(path)",
+            "Find loan with id == loan_id; if not found, emit debug and return None",
+            "Merge updates from data into the loan record",
+            "Persist updated loans via self._storage.write(path, updated_list)",
+            "Emit debug via self._console_printer.print_debug",
+            "Return updated loan dict"
+          ]
+        }
+      ],
+      "notes": [
+        "Used by LibraryService to persist loan creation and returns.",
+        "Repository methods accept path parameters; repository does not assume any internal path configuration."
+      ]
+    },
+    {
+      "id": "core.storage.JsonStorage",
+      "file_path": "core/storage.py",
+      "class_name": "JsonStorage",
+      "role": "storage_adapter",
+      "imports": [
+        {
+          "module": "core.logging",
+          "names": [
+            "ConsolePrinter"
+          ]
+        },
+        {
+          "module": "typing",
+          "names": [
+            "Any",
+            "Dict",
+            "List",
+            "Optional"
+          ]
+        }
+      ],
+      "fields": [
+        {
+          "name": "_console_printer",
+          "type": "ConsolePrinter",
+          "origin": "dependency"
+        }
+      ],
+      "constructor": {
+        "signature": "__init__(self, console_printer: ConsolePrinter) -> None",
+        "parameters": [
+          {
+            "name": "console_printer",
+            "type": "ConsolePrinter"
+          }
+        ],
+        "body_plan": [
+          "Assign console_printer to self._console_printer",
+          "Do not perform any I/O in constructor"
+        ]
+      },
+      "methods": [
+        {
+          "name": "read",
+          "visibility": "public",
+          "return_type": "Optional[Any]",
+          "parameters": [
+            {
+              "name": "path",
+              "type": "str"
+            }
+          ],
+          "steps": [
+            "Attempt to open the file at 'path' and parse JSON into Python structures (list/dict)",
+            "On success, call self._console_printer.print_debug with a message about successful read and return the parsed structure",
+            "On FileNotFoundError or JSON decode error, call self._console_printer.print_error with an explanatory message and return None",
+            "Note: actual I/O and JSON parsing are implementation details; repository callers must handle None as an empty dataset where appropriate"
+          ]
+        },
+        {
+          "name": "write",
+          "visibility": "public",
+          "return_type": "None",
+          "parameters": [
+            {
+              "name": "path",
+              "type": "str"
+            },
+            {
+              "name": "data",
+              "type": "Any"
+            }
+          ],
+          "steps": [
+            "Attempt to open path for writing and serialize 'data' as JSON",
+            "On success, call self._console_printer.print_debug indicating successful write",
+            "On any I/O error, call self._console_printer.print_error with details",
+            "Do not perform retries or complex error recovery; surface errors via print_error"
+          ]
+        }
+      ],
+      "notes": [
+        "Low-level JSON file adapter; callers supply path explicitly per relationship.json (method-level path ownership).",
+        "Uses ConsolePrinter for debug/error messaging rather than importing stdlib logging."
+      ]
+    },
+    {
+      "id": "core.logging.ConsolePrinter",
+      "file_path": "core/printing.py",
+      "class_name": "ConsolePrinter",
+      "role": "logging_adapter",
+      "imports": [
+        {
+          "module": "logging",
+          "names": []
+        },
+        {
+          "module": "typing",
+          "names": [
+            "Any",
+            "Dict"
+          ]
+        }
+      ],
+      "fields": [],
+      "constructor": {
+        "signature": "__init__(self) -> None",
+        "parameters": [],
+        "body_plan": [
+          "Perform trivial logger setup if desired (e.g., configure logging.basicConfig) — conservative implementations may leave configuration to application bootstrap",
+          "Do not depend on other project components"
+        ]
+      },
+      "methods": [
+        {
+          "name": "print_startup",
+          "visibility": "public",
+          "return_type": "None",
+          "parameters": [
+            {
+              "name": "message",
+              "type": "str"
+            }
+          ],
+          "steps": [
+            "Emit a concise startup message to stdout or via logging.info",
+            "This method is referenced by Main per relationship.json and must exist"
+          ]
+        },
+        {
+          "name": "print_summary",
+          "visibility": "public",
+          "return_type": "None",
+          "parameters": [
+            {
+              "name": "summary",
+              "type": "Any"
+            }
+          ],
+          "steps": [
+            "Render the provided summary (generic structure) to a concise textual form and emit to stdout or via logging.info",
+            "Keep formatting simple and stable so tests can assert on output if needed"
+          ]
+        },
+        {
+          "name": "print_info",
+          "visibility": "public",
+          "return_type": "None",
+          "parameters": [
+            {
+              "name": "message",
+              "type": "str"
+            }
+          ],
+          "steps": [
+            "Emit the message via logging.info or print to stdout",
+            "Designed for concise operational messages requested by services"
+          ]
+        },
+        {
+          "name": "print_debug",
+          "visibility": "public",
+          "return_type": "None",
+          "parameters": [
+            {
+              "name": "message",
+              "type": "str"
+            }
+          ],
+          "steps": [
+            "Emit low-level debug messages via logging.debug",
+            "Used by repositories and storage adapter for traceability"
+          ]
+        },
+        {
+          "name": "print_warning",
+          "visibility": "public",
+          "return_type": "None",
+          "parameters": [
+            {
+              "name": "message",
+              "type": "str"
+            }
+          ],
+          "steps": [
+            "Emit a warning message via logging.warning or print to stdout",
+            "Used by services to notify about rule violations or prevented operations"
+          ]
+        },
+        {
+          "name": "print_error",
+          "visibility": "public",
+          "return_type": "None",
+          "parameters": [
+            {
+              "name": "message",
+              "type": "str"
+            }
+          ],
+          "steps": [
+            "Emit an error message via logging.error",
+            "Used by storage adapter for I/O problem reporting"
+          ]
+        }
+      ],
+      "notes": [
+        "Logging adapter: allowed to import stdlib logging per attribution rules.",
+        "Provides concise printing APIs used by application and services.",
+        "Includes print_startup even though it was not listed in earlier notes because Main interaction references it in relationship.json. This preserves relationship-specified interactions."
+      ]
+    }
+  ]
+}
